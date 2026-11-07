@@ -1,0 +1,303 @@
+services:
+  # ==========================================
+  # MESSAGE BROKERS (2 Separate RabbitMQ Containers)
+  # ==========================================
+  camera-queue:
+    image: rabbitmq:3.13-management-alpine
+    container_name: camera-queue
+    ports:
+      - "${CAMERA_QUEUE_HOST_PORT:-5672}:5672"
+      - "${CAMERA_QUEUE_MANAGEMENT_PORT:-15672}:15672"
+    environment:
+      RABBITMQ_DEFAULT_USER: ${CAMERA_QUEUE_USER:-guest}
+      RABBITMQ_DEFAULT_PASS: ${CAMERA_QUEUE_PASS:-guest}
+    volumes:
+      - ./infrastructure/camera-queue/rabbitmq.conf:/etc/rabbitmq/rabbitmq.conf:ro
+      - ./infrastructure/camera-queue/definitions.json:/etc/rabbitmq/definitions.json:ro
+    networks:
+      - distributed_net
+
+  logs-queue:
+    image: rabbitmq:3.13-management-alpine
+    container_name: logs-queue
+    ports:
+      - "${LOGS_QUEUE_HOST_PORT:-5673}:5672"
+      - "${LOGS_QUEUE_MANAGEMENT_PORT:-15673}:15672"
+    environment:
+      RABBITMQ_DEFAULT_USER: ${LOGS_QUEUE_USER:-guest}
+      RABBITMQ_DEFAULT_PASS: ${LOGS_QUEUE_PASS:-guest}
+    volumes:
+      - ./infrastructure/logs-queue/rabbitmq.conf:/etc/rabbitmq/rabbitmq.conf:ro
+      - ./infrastructure/logs-queue/definitions.json:/etc/rabbitmq/definitions.json:ro
+    networks:
+      - distributed_net
+
+  # ==========================================
+  # DATABASES (Auth SQL, Results SQL, Clips S3)
+  # ==========================================
+  auth-db:
+    image: postgres:16-alpine
+    container_name: auth-db
+    ports:
+      - "${AUTH_DB_HOST_PORT:-5433}:5432"
+    environment:
+      POSTGRES_DB: ${AUTH_DB_NAME:-auth_db}
+      POSTGRES_USER: ${AUTH_DB_USER:-postgres}
+      POSTGRES_PASSWORD: ${AUTH_DB_PASS:-postgres}
+    volumes:
+      - auth_db_data:/var/lib/postgresql/data
+      - ./infrastructure/auth-db/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    networks:
+      - distributed_net
+
+  results-db:
+    image: postgres:16-alpine
+    container_name: results-db
+    ports:
+      - "${RESULTS_DB_HOST_PORT:-5434}:5432"
+    environment:
+      POSTGRES_DB: ${RESULTS_DB_NAME:-results_db}
+      POSTGRES_USER: ${RESULTS_DB_USER:-postgres}
+      POSTGRES_PASSWORD: ${RESULTS_DB_PASS:-postgres}
+    volumes:
+      - results_db_data:/var/lib/postgresql/data
+      - ./infrastructure/results-db/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    networks:
+      - distributed_net
+
+  clips-db:
+    image: elestio/minio:latest
+    container_name: clips-db
+    entrypoint: /bin/sh
+    command: -c "mkdir -p /data/$${CLIPS_BUCKET_NAME:-clips} && minio server /data --console-address ':9001'"
+    ports:
+      - "${CLIPS_DB_API_PORT:-9000}:9000"
+      - "${CLIPS_DB_CONSOLE_PORT:-9001}:9001"
+    environment:
+      MINIO_ROOT_USER: ${CLIPS_DB_ACCESS_KEY:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${CLIPS_DB_SECRET_KEY:-minioadmin}
+      CLIPS_BUCKET_NAME: ${CLIPS_BUCKET_NAME:-clips}
+    volumes:
+      - clips_db_data:/data
+    networks:
+      - distributed_net
+
+  # ==========================================
+  # APPLICATION SERVICES (7 Components)
+  # ==========================================
+  api-rest:
+    build: ./api-rest
+    container_name: api-rest
+    ports:
+      - "${API_REST_PORT:-8000}:8000"
+    environment:
+      SERVICE_NAME: api-rest
+      SERVICE_PORT: 8000
+      CAMERA_QUEUE_HOST: ${CAMERA_QUEUE_HOST:-camera-queue}
+      CAMERA_QUEUE_PORT: 5672
+      CAMERA_QUEUE_USER: ${CAMERA_QUEUE_USER:-guest}
+      CAMERA_QUEUE_PASS: ${CAMERA_QUEUE_PASS:-guest}
+      CAMERA_QUEUE_NAME: ${CAMERA_QUEUE_NAME:-camera_processing_queue}
+      LOGS_QUEUE_HOST: ${LOGS_QUEUE_HOST:-logs-queue}
+      LOGS_QUEUE_PORT: 5672
+      LOGS_QUEUE_USER: ${LOGS_QUEUE_USER:-guest}
+      LOGS_QUEUE_PASS: ${LOGS_QUEUE_PASS:-guest}
+      LOGS_QUEUE_NAME: ${LOGS_QUEUE_NAME:-logs_queue}
+      RESULTS_DB_HOST: ${RESULTS_DB_HOST:-results-db}
+      RESULTS_DB_PORT: 5432
+      RESULTS_DB_NAME: ${RESULTS_DB_NAME:-results_db}
+      RESULTS_DB_USER: ${RESULTS_DB_USER:-postgres}
+      RESULTS_DB_PASS: ${RESULTS_DB_PASS:-postgres}
+      CLIPS_DB_ENDPOINT: ${CLIPS_DB_ENDPOINT:-http://clips-db:9000}
+      CLIPS_DB_ACCESS_KEY: ${CLIPS_DB_ACCESS_KEY:-minioadmin}
+      CLIPS_DB_SECRET_KEY: ${CLIPS_DB_SECRET_KEY:-minioadmin}
+      CLIPS_BUCKET_NAME: ${CLIPS_BUCKET_NAME:-clips}
+      AUTH_SERVICE_URL: ${AUTH_SERVICE_URL:-http://auth-service:8005}
+      EDGE_PROCESSOR_URL: ${EDGE_PROCESSOR_URL:-http://edge-processor:8001}
+      CV_MODULE_URL: ${CV_MODULE_URL:-http://cv-module:8002}
+      VISUALIZATION_BACKEND_URL: ${VISUALIZATION_BACKEND_URL:-http://visualization-backend:8003}
+      MONITORING_PIPELINE_URL: ${MONITORING_PIPELINE_URL:-http://monitoring-pipeline:8004}
+    depends_on:
+      - camera-queue
+      - logs-queue
+      - results-db
+      - clips-db
+    networks:
+      - distributed_net
+
+  edge-processor:
+    build: ./edge-processor
+    container_name: edge-processor
+    ports:
+      - "${EDGE_PROCESSOR_PORT:-8001}:8001"
+    environment:
+      SERVICE_NAME: edge-processor
+      SERVICE_PORT: 8001
+      CAMERA_QUEUE_HOST: ${CAMERA_QUEUE_HOST:-camera-queue}
+      CAMERA_QUEUE_PORT: 5672
+      CAMERA_QUEUE_USER: ${CAMERA_QUEUE_USER:-guest}
+      CAMERA_QUEUE_PASS: ${CAMERA_QUEUE_PASS:-guest}
+      CAMERA_QUEUE_NAME: ${CAMERA_QUEUE_NAME:-camera_processing_queue}
+      LOGS_QUEUE_HOST: ${LOGS_QUEUE_HOST:-logs-queue}
+      LOGS_QUEUE_PORT: 5672
+      LOGS_QUEUE_USER: ${LOGS_QUEUE_USER:-guest}
+      LOGS_QUEUE_PASS: ${LOGS_QUEUE_PASS:-guest}
+      LOGS_QUEUE_NAME: ${LOGS_QUEUE_NAME:-logs_queue}
+      CLIPS_DB_ENDPOINT: ${CLIPS_DB_ENDPOINT:-http://clips-db:9000}
+      CLIPS_DB_ACCESS_KEY: ${CLIPS_DB_ACCESS_KEY:-minioadmin}
+      CLIPS_DB_SECRET_KEY: ${CLIPS_DB_SECRET_KEY:-minioadmin}
+      CLIPS_BUCKET_NAME: ${CLIPS_BUCKET_NAME:-clips}
+      CV_MODULE_URL: ${CV_MODULE_URL:-http://cv-module:8002}
+      API_REST_URL: ${API_REST_URL:-http://api-rest:8000}
+    depends_on:
+      - camera-queue
+      - logs-queue
+      - clips-db
+    networks:
+      - distributed_net
+
+  cv-module:
+    build: ./cv-module
+    container_name: cv-module
+    ports:
+      - "${CV_MODULE_PORT:-8002}:8002"
+    environment:
+      SERVICE_NAME: cv-module
+      SERVICE_PORT: 8002
+      CAMERA_QUEUE_HOST: ${CAMERA_QUEUE_HOST:-camera-queue}
+      CAMERA_QUEUE_PORT: 5672
+      CAMERA_QUEUE_USER: ${CAMERA_QUEUE_USER:-guest}
+      CAMERA_QUEUE_PASS: ${CAMERA_QUEUE_PASS:-guest}
+      CAMERA_QUEUE_NAME: ${CAMERA_QUEUE_NAME:-camera_processing_queue}
+      LOGS_QUEUE_HOST: ${LOGS_QUEUE_HOST:-logs-queue}
+      LOGS_QUEUE_PORT: 5672
+      LOGS_QUEUE_USER: ${LOGS_QUEUE_USER:-guest}
+      LOGS_QUEUE_PASS: ${LOGS_QUEUE_PASS:-guest}
+      LOGS_QUEUE_NAME: ${LOGS_QUEUE_NAME:-logs_queue}
+      RESULTS_DB_HOST: ${RESULTS_DB_HOST:-results-db}
+      RESULTS_DB_PORT: 5432
+      RESULTS_DB_NAME: ${RESULTS_DB_NAME:-results_db}
+      RESULTS_DB_USER: ${RESULTS_DB_USER:-postgres}
+      RESULTS_DB_PASS: ${RESULTS_DB_PASS:-postgres}
+      CLIPS_DB_ENDPOINT: ${CLIPS_DB_ENDPOINT:-http://clips-db:9000}
+      CLIPS_DB_ACCESS_KEY: ${CLIPS_DB_ACCESS_KEY:-minioadmin}
+      CLIPS_DB_SECRET_KEY: ${CLIPS_DB_SECRET_KEY:-minioadmin}
+      CLIPS_BUCKET_NAME: ${CLIPS_BUCKET_NAME:-clips}
+      EDGE_PROCESSOR_URL: ${EDGE_PROCESSOR_URL:-http://edge-processor:8001}
+      VISUALIZATION_BACKEND_URL: ${VISUALIZATION_BACKEND_URL:-http://visualization-backend:8003}
+      API_REST_URL: ${API_REST_URL:-http://api-rest:8000}
+    depends_on:
+      - camera-queue
+      - logs-queue
+      - results-db
+      - clips-db
+    networks:
+      - distributed_net
+
+  visualization-backend:
+    build: ./visualization-backend
+    container_name: visualization-backend
+    ports:
+      - "${VISUALIZATION_BACKEND_PORT:-8003}:8003"
+    environment:
+      SERVICE_NAME: visualization-backend
+      SERVICE_PORT: 8003
+      LOGS_QUEUE_HOST: ${LOGS_QUEUE_HOST:-logs-queue}
+      LOGS_QUEUE_PORT: 5672
+      LOGS_QUEUE_USER: ${LOGS_QUEUE_USER:-guest}
+      LOGS_QUEUE_PASS: ${LOGS_QUEUE_PASS:-guest}
+      LOGS_QUEUE_NAME: ${LOGS_QUEUE_NAME:-logs_queue}
+      RESULTS_DB_HOST: ${RESULTS_DB_HOST:-results-db}
+      RESULTS_DB_PORT: 5432
+      RESULTS_DB_NAME: ${RESULTS_DB_NAME:-results_db}
+      RESULTS_DB_USER: ${RESULTS_DB_USER:-postgres}
+      RESULTS_DB_PASS: ${RESULTS_DB_PASS:-postgres}
+      CLIPS_DB_ENDPOINT: ${CLIPS_DB_ENDPOINT:-http://clips-db:9000}
+      CLIPS_DB_ACCESS_KEY: ${CLIPS_DB_ACCESS_KEY:-minioadmin}
+      CLIPS_DB_SECRET_KEY: ${CLIPS_DB_SECRET_KEY:-minioadmin}
+      CLIPS_BUCKET_NAME: ${CLIPS_BUCKET_NAME:-clips}
+      API_REST_URL: ${API_REST_URL:-http://api-rest:8000}
+      CV_MODULE_URL: ${CV_MODULE_URL:-http://cv-module:8002}
+    depends_on:
+      - logs-queue
+      - results-db
+      - clips-db
+    networks:
+      - distributed_net
+
+  monitoring-pipeline:
+    build: ./monitoring-pipeline
+    container_name: monitoring-pipeline
+    ports:
+      - "${MONITORING_PIPELINE_PORT:-8004}:8004"
+    environment:
+      SERVICE_NAME: monitoring-pipeline
+      SERVICE_PORT: 8004
+      LOGS_QUEUE_HOST: ${LOGS_QUEUE_HOST:-logs-queue}
+      LOGS_QUEUE_PORT: 5672
+      LOGS_QUEUE_USER: ${LOGS_QUEUE_USER:-guest}
+      LOGS_QUEUE_PASS: ${LOGS_QUEUE_PASS:-guest}
+      LOGS_QUEUE_NAME: ${LOGS_QUEUE_NAME:-logs_queue}
+      CAMERA_QUEUE_HOST: ${CAMERA_QUEUE_HOST:-camera-queue}
+      CAMERA_QUEUE_PORT: 5672
+      CAMERA_QUEUE_USER: ${CAMERA_QUEUE_USER:-guest}
+      CAMERA_QUEUE_PASS: ${CAMERA_QUEUE_PASS:-guest}
+      CAMERA_QUEUE_NAME: ${CAMERA_QUEUE_NAME:-camera_processing_queue}
+      EDGE_PROCESSOR_URL: ${EDGE_PROCESSOR_URL:-http://edge-processor:8001}
+      CV_MODULE_URL: ${CV_MODULE_URL:-http://cv-module:8002}
+      VISUALIZATION_BACKEND_URL: ${VISUALIZATION_BACKEND_URL:-http://visualization-backend:8003}
+      API_REST_URL: ${API_REST_URL:-http://api-rest:8000}
+      AUTH_SERVICE_URL: ${AUTH_SERVICE_URL:-http://auth-service:8005}
+    depends_on:
+      - camera-queue
+      - logs-queue
+    networks:
+      - distributed_net
+
+  auth-service:
+    build: ./auth-service
+    container_name: auth-service
+    ports:
+      - "${AUTH_SERVICE_PORT:-8005}:8005"
+    environment:
+      SERVICE_NAME: auth-service
+      SERVICE_PORT: 8005
+      AUTH_DB_HOST: ${AUTH_DB_HOST:-auth-db}
+      AUTH_DB_PORT: 5432
+      AUTH_DB_NAME: ${AUTH_DB_NAME:-auth_db}
+      AUTH_DB_USER: ${AUTH_DB_USER:-postgres}
+      AUTH_DB_PASS: ${AUTH_DB_PASS:-postgres}
+      LOGS_QUEUE_HOST: ${LOGS_QUEUE_HOST:-logs-queue}
+      LOGS_QUEUE_PORT: 5672
+      LOGS_QUEUE_USER: ${LOGS_QUEUE_USER:-guest}
+      LOGS_QUEUE_PASS: ${LOGS_QUEUE_PASS:-guest}
+      LOGS_QUEUE_NAME: ${LOGS_QUEUE_NAME:-logs_queue}
+      API_REST_URL: ${API_REST_URL:-http://api-rest:8000}
+    depends_on:
+      - auth-db
+      - logs-queue
+    networks:
+      - distributed_net
+
+  frontend:
+    build: ./frontend
+    container_name: frontend
+    ports:
+      - "${FRONTEND_PORT:-3000}:3000"
+    environment:
+      VITE_API_REST_URL: ${VITE_API_REST_URL:-http://localhost:8000}
+      VITE_AUTH_SERVICE_URL: ${VITE_AUTH_SERVICE_URL:-http://localhost:8005}
+      VITE_VISUALIZATION_BACKEND_URL: ${VITE_VISUALIZATION_BACKEND_URL:-http://localhost:8003}
+    depends_on:
+      - api-rest
+    networks:
+      - distributed_net
+
+networks:
+  distributed_net:
+    driver: bridge
+
+volumes:
+  auth_db_data:
+  results_db_data:
+  clips_db_data:

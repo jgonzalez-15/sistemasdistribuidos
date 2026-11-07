@@ -1,0 +1,2 @@
+-- Results Database Skeleton
+-- Add your tables and schema definitions here during development.
