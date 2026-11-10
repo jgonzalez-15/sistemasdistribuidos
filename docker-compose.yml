@@ -1,7 +1,4 @@
 services:
-  # ==========================================
-  # MESSAGE BROKERS (2 Separate RabbitMQ Containers)
-  # ==========================================
   camera-queue:
     image: rabbitmq:3.13-management-alpine
     container_name: camera-queue
@@ -32,9 +29,6 @@ services:
     networks:
       - distributed_net
 
-  # ==========================================
-  # DATABASES (Auth SQL, Results SQL, Clips S3)
-  # ==========================================
   auth-db:
     image: postgres:16-alpine
     container_name: auth-db
@@ -82,9 +76,6 @@ services:
     networks:
       - distributed_net
 
-  # ==========================================
-  # APPLICATION SERVICES (7 Components)
-  # ==========================================
   api-rest:
     build: ./api-rest
     container_name: api-rest
