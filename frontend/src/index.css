@@ -1547,70 +1547,121 @@ code {
   color: var(--text-tertiary);
 }
 
-/* Atmospheric right column */
+/* Atmospheric right column — Unlabeled Charcoal Street Map */
 .login-visual-col {
   position: relative;
   overflow: hidden;
   background: var(--canvas-raised);
   border-left: 1px solid var(--border);
 }
-.login-visual-svg {
+.login-charcoal-map {
   position: absolute;
   inset: 0;
   width: 100%;
   height: 100%;
+  background: #0c0c0e;
+  pointer-events: none;
 }
-.login-visual-svg text {
-  font-family: var(--font-mono);
+.login-charcoal-map .leaflet-tile-pane {
+  filter: grayscale(100%) contrast(215%) brightness(62%);
 }
-.flow-line {
-  fill: none;
-  stroke-linecap: round;
-  stroke-dasharray: 2 22;
+.login-map-flow {
+  stroke-dasharray: 4 10;
   animation: flow 3.2s linear infinite;
 }
-.flow-line.slow {
+.login-map-flow.slow {
   animation-duration: 5.5s;
 }
-.flow-line.reverse {
-  animation-direction: reverse;
-}
 @keyframes flow {
-  to { stroke-dashoffset: -96; }
+  to { stroke-dashoffset: -84; }
 }
-.node-ring {
-  transform-box: fill-box;
-  transform-origin: center;
+.login-map-node-icon {
+  background: transparent;
+  border: none;
+}
+.login-map-node {
+  position: relative;
+  width: 12px;
+  height: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.login-map-node-core {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--node-color, #ef4444);
+  box-shadow: 0 0 10px var(--node-color, #ef4444);
+}
+.login-map-node-ring {
+  position: absolute;
+  inset: -4px;
+  border-radius: 50%;
+  border: 1px solid var(--node-color, #ef4444);
+  opacity: 0.7;
   animation: nodeRing 2.6s ease-out infinite;
+  animation-delay: inherit;
+}
+.login-map-node-tag {
+  position: absolute;
+  left: 14px;
+  top: 50%;
+  transform: translateY(-50%);
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  color: rgba(250, 250, 250, 0.55);
+  background: rgba(9, 9, 11, 0.72);
+  padding: 1px 4px;
+  border-radius: 3px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  white-space: nowrap;
 }
 @keyframes nodeRing {
-  0% { transform: scale(0.5); opacity: 0.8; }
+  0% { transform: scale(0.5); opacity: 0.85; }
   100% { transform: scale(2.4); opacity: 0; }
 }
 .login-visual-vignette {
   position: absolute;
   inset: 0;
+  z-index: 450;
   pointer-events: none;
   background:
-    radial-gradient(ellipse at 55% 45%, transparent 30%, rgba(12, 12, 14, 0.85) 85%),
-    linear-gradient(to bottom, rgba(12, 12, 14, 0.6), transparent 18%, transparent 78%, rgba(12, 12, 14, 0.95));
+    radial-gradient(ellipse at 52% 46%, transparent 38%, rgba(9, 9, 11, 0.78) 92%),
+    linear-gradient(to bottom, rgba(9, 9, 11, 0.65), transparent 16%, transparent 72%, rgba(9, 9, 11, 0.94));
 }
 .login-visual-head {
   position: absolute;
   top: 20px;
   left: 24px;
   right: 24px;
+  z-index: 500;
   display: flex;
   justify-content: space-between;
   font-family: var(--font-mono);
   font-size: 10.5px;
-  color: var(--text-tertiary);
-  letter-spacing: 0.04em;
+  color: var(--text-secondary);
+  letter-spacing: 0.06em;
+}
+.login-visual-watermark {
+  position: absolute;
+  right: 24px;
+  bottom: 58px;
+  z-index: 500;
+  font-family: var(--font-mono);
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.28em;
+  color: rgba(250, 250, 250, 0.28);
+  pointer-events: none;
 }
 .login-visual-caption {
   position: absolute;
   left: 24px;
   bottom: 64px;
+  z-index: 500;
   max-width: 380px;
 }
 .login-visual-caption h2 {
@@ -1628,10 +1679,11 @@ code {
   left: 0;
   right: 0;
   bottom: 0;
+  z-index: 500;
   display: flex;
   gap: 0;
   border-top: 1px solid var(--border);
-  background: rgba(9, 9, 11, 0.7);
+  background: rgba(9, 9, 11, 0.82);
   backdrop-filter: var(--blur);
   -webkit-backdrop-filter: var(--blur);
 }

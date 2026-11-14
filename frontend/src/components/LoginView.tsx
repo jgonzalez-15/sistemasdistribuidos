@@ -1,4 +1,6 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import L from 'leaflet';
+import 'leaflet/dist/leaflet.css';
 import { AlertCircle, ArrowRight, Eye, EyeOff, Lock, User } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { UserRole } from '../types/traffic';
@@ -37,110 +39,103 @@ function portOf(url: string): string {
   }
 }
 
-/* ---------- Atmospheric Montevideo vector canvas ---------- */
-const BOUNDS = { latTop: -34.848, latBottom: -34.93, lngLeft: -56.222, lngRight: -56.108 };
-const VB = 800;
+/* ---------- Unlabeled Charcoal Street Map + Animated Telemetry Overlay ---------- */
+const LoginCharcoalMap: React.FC = () => {
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  const mapRef = useRef<L.Map | null>(null);
 
-function project([lat, lng]: [number, number]): [number, number] {
-  const x = ((lng - BOUNDS.lngLeft) / (BOUNDS.lngRight - BOUNDS.lngLeft)) * VB;
-  const y = ((BOUNDS.latTop - lat) / (BOUNDS.latTop - BOUNDS.latBottom)) * VB;
-  return [x, y];
-}
+  useEffect(() => {
+    if (!containerRef.current || mapRef.current) return;
 
-function toPath(points: [number, number][]): string {
-  return points
-    .map((p, i) => {
-      const [x, y] = project(p);
-      return `${i === 0 ? 'M' : 'L'}${x.toFixed(1)},${y.toFixed(1)}`;
-    })
-    .join(' ');
-}
+    const map = L.map(containerRef.current, {
+      center: [-34.8995, -56.1645],
+      zoom: 13.5,
+      zoomSnap: 0.1,
+      zoomControl: false,
+      attributionControl: false,
+      dragging: false,
+      scrollWheelZoom: false,
+      doubleClickZoom: false,
+      boxZoom: false,
+      keyboard: false,
+      touchZoom: false,
+    });
 
-const AVENUES: { id: string; color: string; pts: [number, number][]; slow?: boolean; reverse?: boolean }[] = [
-  { id: '18julio', color: '#EF4444', pts: [[-34.9068, -56.2125], [-34.9057, -56.1869], [-34.9010, -56.1740], [-34.8949, -56.1650], [-34.8915, -56.1420], [-34.8880, -56.1150]] },
-  { id: 'artigas', color: '#F59E0B', pts: [[-34.9148, -56.1628], [-34.9050, -56.1640], [-34.8949, -56.1650], [-34.8840, -56.1700], [-34.8700, -56.1790], [-34.8560, -56.1870]], reverse: true },
-  { id: 'rivera', color: '#10B981', pts: [[-34.9040, -56.1790], [-34.9020, -56.1600], [-34.9012, -56.1385], [-34.8985, -56.1180]], slow: true },
-  { id: '8oct', color: '#EF4444', pts: [[-34.8949, -56.1650], [-34.8870, -56.1560], [-34.8793, -56.1479], [-34.8680, -56.1330], [-34.8590, -56.1180]] },
-  { id: 'agraciada', color: '#F59E0B', pts: [[-34.9030, -56.2050], [-34.8960, -56.1960], [-34.8899, -56.1874], [-34.8780, -56.1900], [-34.8664, -56.1923], [-34.8520, -56.2010]], slow: true },
-  { id: 'italia', color: '#3B82F6', pts: [[-34.8949, -56.1650], [-34.8960, -56.1450], [-34.8975, -56.1250], [-34.8990, -56.1100]], reverse: true },
-];
+    // Esri World Dark Gray Base: pure charcoal street blocks & coastline with zero street names, zero POI labels, and no API key required
+    L.tileLayer(
+      'https://services.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}',
+      {
+        maxZoom: 16,
+      }
+    ).addTo(map);
 
-const COAST: [number, number][] = [
-  [-34.9035, -56.2220], [-34.9095, -56.2120], [-34.9110, -56.2000], [-34.9135, -56.1880],
-  [-34.9175, -56.1760], [-34.9210, -56.1660], [-34.9195, -56.1560], [-34.9140, -56.1500],
-  [-34.9103, -56.1441], [-34.9080, -56.1340], [-34.9050, -56.1220], [-34.9020, -56.1080],
-];
+    const overlayGroup = L.layerGroup().addTo(map);
 
-const AtmosphericCanvas: React.FC = () => {
-  const coastPath = useMemo(() => toPath(COAST), []);
-  const nodes = useMemo(
-    () => INITIAL_INTERSECTIONS_MOCK.map((n) => ({ id: n.id, code: n.cameraCode, status: n.status, xy: project(n.coordinates) })),
-    []
-  );
+    // Subtle real-coordinate street corridors and pulsing camera nodes over the charcoal street grid
+    INITIAL_INTERSECTIONS_MOCK.forEach((node, idx) => {
+      const color =
+        node.status === 'congestionado'
+          ? '#EF4444'
+          : node.status === 'moderado'
+          ? '#F59E0B'
+          : '#10B981';
 
-  return (
-    <svg className="login-visual-svg" viewBox={`0 0 ${VB} ${VB}`} preserveAspectRatio="xMidYMid slice" aria-hidden="true">
-      <defs>
-        <pattern id="grid" width="32" height="32" patternUnits="userSpaceOnUse">
-          <path d="M32 0H0V32" fill="none" stroke="rgba(255,255,255,0.025)" strokeWidth="1" />
-        </pattern>
-      </defs>
-      <rect width={VB} height={VB} fill="url(#grid)" />
+      node.streetCorridors.forEach((corridor) => {
+        L.polyline(corridor.coordinates, {
+          color,
+          weight: 5,
+          opacity: 0.14,
+          lineCap: 'round',
+          lineJoin: 'round',
+          interactive: false,
+        }).addTo(overlayGroup);
 
-      {/* Coastline contours (topographic offset) */}
-      {[0, 14, 28, 44, 62].map((offset, i) => (
-        <path
-          key={offset}
-          d={coastPath}
-          transform={`translate(0 ${offset})`}
-          fill="none"
-          stroke="rgba(255,255,255,1)"
-          strokeOpacity={0.12 - i * 0.022}
-          strokeWidth="1"
-        />
-      ))}
+        L.polyline(corridor.coordinates, {
+          color,
+          weight: 1.75,
+          opacity: 0.72,
+          dashArray: '4, 10',
+          className: `login-map-flow ${idx % 2 === 0 ? '' : 'slow'}`,
+          lineCap: 'round',
+          lineJoin: 'round',
+          interactive: false,
+        }).addTo(overlayGroup);
+      });
 
-      {/* Avenue base strokes */}
-      {AVENUES.map((a) => (
-        <path key={`base-${a.id}`} d={toPath(a.pts)} fill="none" stroke="rgba(255,255,255,0.09)" strokeWidth="1.25" strokeLinejoin="round" />
-      ))}
+      const dotHtml = `
+        <div class="login-map-node" style="--node-color:${color};animation-delay:${(idx * 0.28).toFixed(2)}s">
+          <span class="login-map-node-ring"></span>
+          <span class="login-map-node-core"></span>
+          <span class="login-map-node-tag">${node.cameraCode}</span>
+        </div>
+      `;
 
-      {/* Animated low-opacity flows */}
-      {AVENUES.map((a) => (
-        <path
-          key={`flow-${a.id}`}
-          d={toPath(a.pts)}
-          className={`flow-line ${a.slow ? 'slow' : ''} ${a.reverse ? 'reverse' : ''}`}
-          stroke={a.color}
-          strokeOpacity="0.55"
-          strokeWidth="1.75"
-        />
-      ))}
+      L.marker(node.coordinates, {
+        interactive: false,
+        icon: L.divIcon({
+          className: 'login-map-node-icon',
+          html: dotHtml,
+          iconSize: [12, 12],
+          iconAnchor: [6, 6],
+        }),
+      }).addTo(overlayGroup);
+    });
 
-      {/* Monitored nodes */}
-      {nodes.map((n, i) => {
-        const color = n.status === 'congestionado' ? '#EF4444' : n.status === 'moderado' ? '#F59E0B' : '#10B981';
-        return (
-          <g key={n.id}>
-            <circle
-              className="node-ring"
-              cx={n.xy[0]}
-              cy={n.xy[1]}
-              r="6"
-              fill="none"
-              stroke={color}
-              strokeOpacity="0.6"
-              style={{ animationDelay: `${i * 0.32}s` }}
-            />
-            <circle cx={n.xy[0]} cy={n.xy[1]} r="2.5" fill={color} />
-            <text x={n.xy[0] + 9} y={n.xy[1] + 3} fontSize="9" fill="rgba(255,255,255,0.28)">
-              {n.code}
-            </text>
-          </g>
-        );
-      })}
-    </svg>
-  );
+    mapRef.current = map;
+
+    const resizeObserver = new ResizeObserver(() => {
+      map.invalidateSize({ animate: false });
+    });
+    resizeObserver.observe(containerRef.current);
+
+    return () => {
+      resizeObserver.disconnect();
+      map.remove();
+      mapRef.current = null;
+    };
+  }, []);
+
+  return <div ref={containerRef} className="login-charcoal-map" data-testid="login-charcoal-map" />;
 };
 
 export const LoginView: React.FC<LoginViewProps> = ({ onLoginSuccess }) => {
@@ -166,10 +161,13 @@ export const LoginView: React.FC<LoginViewProps> = ({ onLoginSuccess }) => {
     setPassword(pass);
   };
 
-  const endpoints: { name: string; url: string; state: EndpointState }[] = [
-    { name: 'API REST', url: API_REST_URL, state: apiState },
-    { name: 'AUTH SERVICE', url: AUTH_SERVICE_URL, state: authState },
-  ];
+  const endpoints = useMemo(
+    () => [
+      { name: 'API REST', url: API_REST_URL, state: apiState },
+      { name: 'AUTH SERVICE', url: AUTH_SERVICE_URL, state: authState },
+    ],
+    [apiState, authState]
+  );
 
   return (
     <div className="login-shell">
@@ -324,17 +322,21 @@ export const LoginView: React.FC<LoginViewProps> = ({ onLoginSuccess }) => {
         </div>
       </section>
 
-      {/* Right: atmospheric canvas */}
+      {/* Right: Unlabeled Charcoal Street Map + Animated Telemetry */}
       <section className="login-visual-col" aria-hidden="true">
-        <AtmosphericCanvas />
+        <LoginCharcoalMap />
         <div className="login-visual-vignette" />
         <div className="login-visual-head">
           <span>MONTEVIDEO · 34°54′S 56°11′W</span>
           <span>{INITIAL_INTERSECTIONS_MOCK.length} NODOS CV</span>
         </div>
+        <div className="login-visual-watermark">MONTEVIDEO</div>
         <div className="login-visual-caption">
           <h2>Red de visión artificial distribuida</h2>
-          <p>Workers en contenedores procesan clips de cámaras en paralelo vía RabbitMQ y consolidan el estado vial en PostgreSQL.</p>
+          <p>
+            Workers en contenedores procesan clips de cámaras en paralelo vía RabbitMQ y consolidan
+            el estado vial en PostgreSQL.
+          </p>
         </div>
         <div className="endpoint-footer">
           {endpoints.map((ep) => (
