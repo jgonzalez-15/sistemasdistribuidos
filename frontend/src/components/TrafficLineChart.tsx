@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { TimeSeriesPoint } from '../types/traffic';
 
 interface TrafficLineChartProps {
@@ -6,243 +6,206 @@ interface TrafficLineChartProps {
   maxCapacity: number;
 }
 
-export const TrafficLineChart: React.FC<TrafficLineChartProps> = ({
-  data,
-  maxCapacity,
-}) => {
+const HEIGHT = 232;
+const PAD = { left: 34, right: 52, top: 14, bottom: 26 };
+
+function colorForValue(v: number): string {
+  if (v >= 75) return '#EF4444';
+  if (v >= 40) return '#F59E0B';
+  return '#10B981';
+}
+
+export const TrafficLineChart: React.FC<TrafficLineChartProps> = ({ data, maxCapacity }) => {
+  const wrapRef = useRef<HTMLDivElement | null>(null);
+  const [width, setWidth] = useState<number>(600);
   const [hoveredIndex, setHoveredIndex] = useState<number | null>(null);
 
+  // Use real pixel width as viewBox so mono labels render at a true 11px
+  useEffect(() => {
+    const el = wrapRef.current;
+    if (!el) return;
+    const update = () => setWidth(Math.max(320, Math.round(el.getBoundingClientRect().width)));
+    update();
+    const ro = new ResizeObserver(update);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
   if (!data || data.length === 0) {
-    return <div className="chart-empty">Sin datos históricos disponibles</div>;
+    return <div className="chart-empty">SIN DATOS HISTÓRICOS</div>;
   }
 
-  const width = 820;
-  const height = 310;
-  const padLeft = 52;
-  const padRight = 28;
-  const padTop = 26;
-  const padBottom = 42;
-
-  const plotWidth = width - padLeft - padRight;
-  const plotHeight = height - padTop - padBottom;
-
-  const rawMax = Math.max(
-    maxCapacity,
-    ...data.map((d) => d.vehicles),
-    120
-  );
+  const plotW = width - PAD.left - PAD.right;
+  const plotH = HEIGHT - PAD.top - PAD.bottom;
+  const rawMax = Math.max(maxCapacity, ...data.map((d) => d.vehicles), 120);
   const maxY = Math.ceil(rawMax / 30) * 30;
+  const yTicks = Array.from({ length: maxY / 30 + 1 }, (_, i) => i * 30);
 
-  const getX = (index: number) =>
-    padLeft + (index / Math.max(1, data.length - 1)) * plotWidth;
+  const getX = (i: number) => PAD.left + (i / Math.max(1, data.length - 1)) * plotW;
+  const getY = (v: number) => PAD.top + plotH - (Math.min(Math.max(v, 0), maxY) / maxY) * plotH;
 
-  const getY = (value: number) =>
-    padTop + plotHeight - (Math.min(Math.max(value, 0), maxY) / maxY) * plotHeight;
-
-  const pointsString = data
-    .map((pt, idx) => `${getX(idx).toFixed(1)},${getY(pt.vehicles).toFixed(1)}`)
+  const linePath = data
+    .map((pt, i) => `${i === 0 ? 'M' : 'L'}${getX(i).toFixed(1)},${getY(pt.vehicles).toFixed(1)}`)
     .join(' ');
+  const baseY = (PAD.top + plotH).toFixed(1);
+  const areaPath = `${linePath} L${getX(data.length - 1).toFixed(1)},${baseY} L${getX(0).toFixed(1)},${baseY} Z`;
 
-  const areaPath = `M ${getX(0).toFixed(1)},${(padTop + plotHeight).toFixed(1)} L ${data
-    .map((pt, idx) => `${getX(idx).toFixed(1)},${getY(pt.vehicles).toFixed(1)}`)
-    .join(' L ')} L ${getX(data.length - 1).toFixed(1)},${(padTop + plotHeight).toFixed(
-    1
-  )} Z`;
+  const spacing = plotW / Math.max(1, data.length - 1);
+  const labelStep = Math.max(1, Math.ceil(64 / spacing));
+  const lastIdx = data.length - 1;
 
-  const yCongestion = getY(75);
-  const yModerate = getY(40);
+  const activeIdx = hoveredIndex !== null ? Math.min(hoveredIndex, lastIdx) : null;
+  const activePoint = activeIdx !== null ? data[activeIdx] : null;
+  const lastPoint = data[lastIdx];
 
-  const yTicks = Array.from({ length: maxY / 30 + 1 }, (_, idx) => idx * 30);
+  const handleMove = (e: React.MouseEvent<SVGRectElement>) => {
+    const rect = (e.currentTarget.ownerSVGElement as SVGSVGElement).getBoundingClientRect();
+    const x = ((e.clientX - rect.left) / rect.width) * width;
+    const idx = Math.round(((x - PAD.left) / plotW) * lastIdx);
+    setHoveredIndex(Math.max(0, Math.min(lastIdx, idx)));
+  };
 
-  const effectiveHoveredIndex =
-    hoveredIndex !== null ? Math.min(hoveredIndex, data.length - 1) : data.length - 1;
-  const activePoint = data[effectiveHoveredIndex] || data[data.length - 1];
+  const thresholds = [
+    { value: 75, label: 'CRIT 75' },
+    { value: 40, label: 'MOD 40' },
+  ];
 
   return (
-    <div className="traffic-chart-container">
-      <div className="chart-top-bar">
-        <div className="chart-legend">
-          <span className="legend-item">
-            <span className="legend-line blue" /> Volumen Vehicular (vehículos / hora)
-          </span>
-          <span className="legend-item">
-            <span className="legend-line red-dashed" /> Umbral Congestión (≥ 75 veh.)
-          </span>
-          <span className="legend-item">
-            <span className="legend-line yellow-dashed" /> Umbral Moderado (≥ 40 veh.)
-          </span>
-        </div>
+    <div className="chart-wrap" ref={wrapRef}>
+      <svg
+        className="chart-svg"
+        viewBox={`0 0 ${width} ${HEIGHT}`}
+        height={HEIGHT}
+        role="img"
+        aria-label="Evolución temporal del volumen vehicular"
+      >
+        <defs>
+          <linearGradient id="tmAreaGrad" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor="#3B82F6" stopOpacity="0.22" />
+            <stop offset="100%" stopColor="#3B82F6" stopOpacity="0" />
+          </linearGradient>
+        </defs>
 
-        {activePoint && (
-          <div className="chart-live-tooltip">
-            <span className="tooltip-hour">Hora {activePoint.hour}:</span>
-            <strong
-              className={`tooltip-count ${
-                activePoint.vehicles >= 75
-                  ? 'text-red'
-                  : activePoint.vehicles >= 40
-                  ? 'text-yellow'
-                  : 'text-green'
-              }`}
-            >
-              {activePoint.vehicles} vehículos
-            </strong>
-          </div>
-        )}
-      </div>
+        {yTicks.map((t) => (
+          <g key={t}>
+            <line
+              x1={PAD.left}
+              x2={width - PAD.right}
+              y1={getY(t)}
+              y2={getY(t)}
+              stroke="rgba(255,255,255,0.05)"
+              strokeWidth="1"
+            />
+            <text x={PAD.left - 8} y={getY(t) + 3.5} textAnchor="end" fill="#52525B" fontSize="11">
+              {t}
+            </text>
+          </g>
+        ))}
 
-      <div className="svg-responsive-wrapper">
-        <svg
-          viewBox={`0 0 ${width} ${height}`}
-          className="traffic-line-svg"
-          role="img"
-          aria-label="Gráfico bidimensional de líneas de evolución vehicular por hora"
-        >
-          <defs>
-            <linearGradient id="trafficAreaGrad" x1="0" y1="0" x2="0" y2="1">
-              <stop offset="0%" stopColor="#38bdf8" stopOpacity="0.38" />
-              <stop offset="100%" stopColor="#38bdf8" stopOpacity="0.02" />
-            </linearGradient>
-          </defs>
+        {thresholds.map((th) => (
+          <g key={th.value}>
+            <line
+              x1={PAD.left}
+              x2={width - PAD.right}
+              y1={getY(th.value)}
+              y2={getY(th.value)}
+              stroke="rgba(255,255,255,0.14)"
+              strokeWidth="1"
+              strokeDasharray="3 4"
+            />
+            <text x={width - PAD.right + 6} y={getY(th.value) + 3.5} fill="#52525B" fontSize="9.5">
+              {th.label}
+            </text>
+          </g>
+        ))}
 
-          {/* Horizontal Grid Lines & Y Axis Labels */}
-          {yTicks.map((tick) => {
-            const y = getY(tick);
-            return (
-              <g key={tick}>
-                <line
-                  x1={padLeft}
-                  y1={y}
-                  x2={width - padRight}
-                  y2={y}
-                  stroke="rgba(148, 163, 184, 0.14)"
-                  strokeWidth="1"
-                />
-                <text
-                  x={padLeft - 10}
-                  y={y + 4}
-                  textAnchor="end"
-                  fill="#94a3b8"
-                  fontSize="11"
-                >
-                  {tick}
-                </text>
-              </g>
-            );
-          })}
+        <path d={areaPath} fill="url(#tmAreaGrad)" />
+        <path d={linePath} fill="none" stroke="#3B82F6" strokeWidth="1.75" strokeLinejoin="round" strokeLinecap="round" />
 
-          {/* Threshold Line: Congestion (75) */}
-          <line
-            x1={padLeft}
-            y1={yCongestion}
-            x2={width - padRight}
-            y2={yCongestion}
-            stroke="#ef4444"
-            strokeWidth="1.5"
-            strokeDasharray="6 4"
-          />
-          <text
-            x={width - padRight - 4}
-            y={yCongestion - 6}
-            textAnchor="end"
-            fill="#fca5a5"
-            fontSize="10"
-            fontWeight="600"
-          >
-            Umbral Crítico (75)
-          </text>
-
-          {/* Threshold Line: Moderate (40) */}
-          <line
-            x1={padLeft}
-            y1={yModerate}
-            x2={width - padRight}
-            y2={yModerate}
-            stroke="#f59e0b"
-            strokeWidth="1.2"
-            strokeDasharray="4 4"
-          />
-
-          {/* Area under the curve */}
-          <path d={areaPath} fill="url(#trafficAreaGrad)" />
-
-          {/* Main 2D Line */}
-          <polyline
-            fill="none"
-            stroke="#38bdf8"
-            strokeWidth="3"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            points={pointsString}
-          />
-
-          {/* Data Points & X Axis Labels */}
-          {data.map((pt, idx) => {
-            const cx = getX(idx);
-            const cy = getY(pt.vehicles);
-            const isHovered = effectiveHoveredIndex === idx;
-            const dotColor =
-              pt.vehicles >= 75
-                ? '#ef4444'
-                : pt.vehicles >= 40
-                ? '#f59e0b'
-                : '#10b981';
-
-            return (
-              <g
-                key={`point-${idx}`}
-                onMouseEnter={() => setHoveredIndex(idx)}
-                onMouseLeave={() => setHoveredIndex(null)}
-                style={{ cursor: 'pointer' }}
+        {data.map((pt, i) =>
+          i % labelStep === 0 || i === lastIdx ? (
+            (i !== lastIdx && lastIdx - i < labelStep) ? null : (
+              <text
+                key={`x-${i}`}
+                x={getX(i)}
+                y={HEIGHT - 6}
+                textAnchor={i === 0 ? 'start' : i === lastIdx ? 'end' : 'middle'}
+                fill={i === activeIdx ? '#FAFAFA' : '#52525B'}
+                fontSize="11"
               >
-                {isHovered && (
-                  <line
-                    x1={cx}
-                    y1={padTop}
-                    x2={cx}
-                    y2={padTop + plotHeight}
-                    stroke="rgba(56, 189, 248, 0.35)"
-                    strokeWidth="1.5"
-                    strokeDasharray="3 3"
-                  />
-                )}
+                {pt.hour}
+              </text>
+            )
+          ) : null
+        )}
 
-                <circle
-                  cx={cx}
-                  cy={cy}
-                  r={isHovered ? 6.5 : 4.5}
-                  fill={dotColor}
-                  stroke="#0f172a"
-                  strokeWidth="2"
-                />
+        {/* Last known point */}
+        <circle cx={getX(lastIdx)} cy={getY(lastPoint.vehicles)} r="6" fill={colorForValue(lastPoint.vehicles)} opacity="0.18" />
+        <circle
+          cx={getX(lastIdx)}
+          cy={getY(lastPoint.vehicles)}
+          r="3"
+          fill={colorForValue(lastPoint.vehicles)}
+          stroke="#09090B"
+          strokeWidth="1.5"
+        />
 
-                {/* Value label above each point */}
-                <text
-                  x={cx}
-                  y={cy - 10}
-                  textAnchor="middle"
-                  fill={isHovered ? '#f8fafc' : '#cbd5e1'}
-                  fontSize={isHovered ? '11.5' : '10'}
-                  fontWeight={isHovered ? '700' : '500'}
-                >
-                  {pt.vehicles}
-                </text>
+        {activePoint && activeIdx !== null && (
+          <g pointerEvents="none">
+            <line
+              x1={getX(activeIdx)}
+              x2={getX(activeIdx)}
+              y1={PAD.top}
+              y2={PAD.top + plotH}
+              stroke="rgba(255,255,255,0.18)"
+              strokeWidth="1"
+            />
+            <circle
+              cx={getX(activeIdx)}
+              cy={getY(activePoint.vehicles)}
+              r="3.5"
+              fill="#09090B"
+              stroke={colorForValue(activePoint.vehicles)}
+              strokeWidth="1.75"
+            />
+          </g>
+        )}
 
-                {/* X Axis Hour Label */}
-                <text
-                  x={cx}
-                  y={height - 14}
-                  textAnchor="middle"
-                  fill={isHovered ? '#38bdf8' : '#94a3b8'}
-                  fontSize={data.length > 10 ? '10' : '11'}
-                  fontWeight={isHovered ? '700' : '500'}
-                >
-                  {pt.hour}
-                </text>
-              </g>
-            );
-          })}
-        </svg>
+        <rect
+          x={PAD.left}
+          y={PAD.top}
+          width={plotW}
+          height={plotH}
+          fill="transparent"
+          onMouseMove={handleMove}
+          onMouseLeave={() => setHoveredIndex(null)}
+          style={{ cursor: 'crosshair' }}
+        />
+      </svg>
+
+      {activePoint && activeIdx !== null && (
+        <div
+          className="chart-tooltip"
+          style={{
+            left: `${(getX(activeIdx) / width) * 100}%`,
+            top: getY(activePoint.vehicles),
+          }}
+        >
+          <div className="chart-tooltip-time">{activePoint.hour} HS</div>
+          <div className="chart-tooltip-value">
+            <span className="status-dot" style={{ background: colorForValue(activePoint.vehicles) }} />
+            {activePoint.vehicles} <small>VEH</small>
+          </div>
+        </div>
+      )}
+
+      <div className="chart-legend">
+        <span>
+          <i className="legend-swatch" /> VOLUMEN VEH/H
+        </span>
+        <span>
+          <i className="legend-swatch dashed" /> UMBRALES 75 · 40
+        </span>
       </div>
     </div>
   );

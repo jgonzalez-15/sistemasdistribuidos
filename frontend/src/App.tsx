@@ -1,9 +1,9 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { AuthProvider, useAuth } from './context/AuthContext';
-import { TopNavbar } from './components/TopNavbar';
-import { LoginView } from './views/LoginView';
+import { Header, ViewMode } from './components/Header';
+import { LoginView } from './components/LoginView';
 import { DashboardView } from './views/DashboardView';
-import './styles/dashboard.css';
+import './index.css';
 
 interface RouteState {
   view: 'login' | 'dashboard' | 'detail';
@@ -29,10 +29,14 @@ const AppRouter: React.FC = () => {
   const { isAuthenticated } = useAuth();
   const [route, setRoute] = useState<RouteState>(() => parseHashRoute(isAuthenticated));
   const [isFaultTolerantDemoMode, setIsFaultTolerantDemoMode] = useState<boolean>(false);
+  const lastSelectedIdRef = useRef<string>('int-001');
 
   useEffect(() => {
     const syncFromHash = () => {
       const next = parseHashRoute(isAuthenticated);
+      if (next.intersectionId) {
+        lastSelectedIdRef.current = next.intersectionId;
+      }
       setRoute(next);
       if (!isAuthenticated && window.location.hash !== '#/login') {
         window.location.hash = '#/login';
@@ -55,19 +59,32 @@ const AppRouter: React.FC = () => {
   };
 
   const navigateToIntersectionDetail = (intersectionId: string) => {
+    lastSelectedIdRef.current = intersectionId;
     window.location.hash = `#/intersections/${intersectionId}`;
     setRoute({ view: 'detail', intersectionId });
+  };
+
+  const handleChangeViewMode = (mode: ViewMode) => {
+    if (mode === 'map') {
+      navigateToFullMap();
+    } else {
+      const targetId = route.intersectionId || lastSelectedIdRef.current || 'int-001';
+      navigateToIntersectionDetail(targetId);
+    }
   };
 
   if (!isAuthenticated || route.view === 'login') {
     return <LoginView onLoginSuccess={navigateToFullMap} />;
   }
 
+  const viewMode: ViewMode = route.view === 'detail' ? 'split' : 'map';
+
   return (
     <div className="app-shell">
-      <TopNavbar
-        onNavigateDashboard={navigateToFullMap}
-        currentView={route.view === 'detail' ? 'detail' : 'dashboard'}
+      <Header
+        viewMode={viewMode}
+        onChangeViewMode={handleChangeViewMode}
+        onNavigateHome={navigateToFullMap}
         isFaultTolerantDemoMode={isFaultTolerantDemoMode}
         onToggleFaultTolerance={() => setIsFaultTolerantDemoMode((prev) => !prev)}
       />

@@ -1,13 +1,15 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { CongestionLevel, IntersectionSummary } from '../types/traffic';
+import { IntersectionSummary } from '../types/traffic';
 import {
   fetchIntersectionsFromBff,
   resetNormalTrafficSimulation,
   simulateNextWorkerBatchUpdate,
   triggerConcurrentCongestionSimulation,
 } from '../services/bffApi';
-import { MontevideoTrafficMap } from '../components/MontevideoTrafficMap';
-import { IntersectionDetailView } from './IntersectionDetailView';
+import { NodeSidebar, StatusFilter } from '../components/NodeSidebar';
+import { SimulationToolbar } from '../components/SimulationToolbar';
+import { TrafficMap } from '../components/TrafficMap';
+import { NodeDetailPanel } from '../components/NodeDetailPanel';
 
 interface DashboardViewProps {
   selectedIntersectionId: string | null;
@@ -24,7 +26,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
 }) => {
   const [intersections, setIntersections] = useState<IntersectionSummary[]>([]);
   const [isLoading, setIsLoading] = useState<boolean>(true);
-  const [filterStatus, setFilterStatus] = useState<CongestionLevel | 'todos'>('todos');
+  const [filterStatus, setFilterStatus] = useState<StatusFilter>('todos');
   const [lastSyncTime, setLastSyncTime] = useState<string>('');
   const [simulationMode, setSimulationMode] = useState<'normal' | 'concurrent_congestion'>('normal');
   const [refreshCounter, setRefreshCounter] = useState<number>(0);
@@ -80,11 +82,6 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
     return () => window.clearInterval(timerId);
   }, [isAutoBatchActive, isFaultTolerantDemoMode, handleSimulateBatch]);
 
-  const countFluid = intersections.filter((i) => i.status === 'fluido').length;
-  const countModerate = intersections.filter((i) => i.status === 'moderado').length;
-  const countCongested = intersections.filter((i) => i.status === 'congestionado').length;
-  const totalVehicles = intersections.reduce((acc, i) => acc + i.vehicleCount, 0);
-
   const visibleIntersections =
     filterStatus === 'todos'
       ? intersections
@@ -93,155 +90,45 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   const isSplitOpen = Boolean(selectedIntersectionId);
 
   return (
-    <main className="waze-workspace-container">
+    <main className="workspace">
       {isFaultTolerantDemoMode && (
-        <div className="fault-tolerance-floating-banner" role="status">
-          <strong>Tolerancia a Fallos Activa (Stateless Twelve-Factor):</strong> Workers{' '}
-          <code>cv-module</code> en pausa · <strong>RabbitMQ</strong> reteniendo cola{' '}
-          <code>camera_processing_queue</code> · <strong>BFF FastAPI</strong> sirviendo último
-          estado consolidado en PostgreSQL.
+        <div className="fault-banner" role="status">
+          <strong>TOLERANCIA A FALLOS ACTIVA:</strong> Workers <code>cv-module</code> en pausa ·{' '}
+          <strong>RabbitMQ</strong> reteniendo <code>camera_processing_queue</code> ·{' '}
+          <strong>BFF FastAPI</strong> sirviendo último estado consolidado en PostgreSQL.
         </div>
       )}
 
-      {/* Split Workspace: Map on Left (100% -> 50%) + Apple Spring Side Panel on Right (0% -> 50%) */}
-      <div className={`apple-split-stage ${isSplitOpen ? 'is-split-open' : ''}`}>
-        {/* LEFT PANE: Interactive Montevideo Map + Floating Waze HUD */}
-        <section className="map-pane-left" aria-label="Mapa en vivo del tránsito en Montevideo">
-          {/* Top-Left Floating Waze Summary Card (like reference image 1) */}
-          <div className="waze-floating-hud-left">
-            <div className="waze-hud-header">
-              <div className={`waze-live-badge ${countCongested >= 4 ? 'critical' : ''}`}>
-                <span className="waze-pulse-dot" />
-                <span>LIVE TRAFFIC · MONTEVIDEO</span>
-              </div>
-              <span className="waze-sync-clock">Sync: {lastSyncTime || '...'}</span>
-            </div>
+      <div className={`split-stage ${isSplitOpen ? 'is-split' : ''}`}>
+        <section className="map-pane" aria-label="Mapa en vivo del tránsito en Montevideo">
+          <NodeSidebar
+            intersections={intersections}
+            filterStatus={filterStatus}
+            onChangeFilter={setFilterStatus}
+            selectedIntersectionId={selectedIntersectionId}
+            onSelectIntersection={onSelectIntersection}
+            onCloseDetail={onCloseDetail}
+            lastSyncTime={lastSyncTime}
+          />
 
-            <h2 className="waze-hud-city-title">Montevideo — Red Vial</h2>
-            <p className="waze-hud-status-line">
-              <strong className="text-red">{countCongested} congestionadas</strong> ·{' '}
-              <span className="text-yellow">{countModerate} moderadas</span> ·{' '}
-              <span className="text-green">{countFluid} fluidas</span> ({totalVehicles} veh.)
-            </p>
-
-            {/* Filter Chips inside HUD */}
-            <div className="waze-hud-filters">
-              <button
-                type="button"
-                className={`hud-chip ${filterStatus === 'todos' ? 'active' : ''}`}
-                onClick={() => setFilterStatus('todos')}
-              >
-                Todas ({intersections.length})
-              </button>
-              <button
-                type="button"
-                className={`hud-chip chip-red ${filterStatus === 'congestionado' ? 'active' : ''}`}
-                onClick={() => setFilterStatus('congestionado')}
-              >
-                Rojo ({countCongested})
-              </button>
-              <button
-                type="button"
-                className={`hud-chip chip-yellow ${filterStatus === 'moderado' ? 'active' : ''}`}
-                onClick={() => setFilterStatus('moderado')}
-              >
-                Amarillo ({countModerate})
-              </button>
-              <button
-                type="button"
-                className={`hud-chip chip-green ${filterStatus === 'fluido' ? 'active' : ''}`}
-                onClick={() => setFilterStatus('fluido')}
-              >
-                Verde ({countFluid})
-              </button>
-            </div>
-
-            <div className="waze-hud-hint">
-              Pasa el cursor sobre un nodo para ver su tarjeta · Haz clic para abrir el panel dividido
-            </div>
-          </div>
-
-          {/* Top-Right Floating Simulation Controls Pill */}
-          <div className="waze-floating-hud-right">
-            <button
-              type="button"
-              id="btn-concurrent-congestion"
-              className={`btn-hud-sim ${
-                simulationMode === 'concurrent_congestion' ? 'active-danger' : ''
-              }`}
-              onClick={handleTriggerConcurrentCongestion}
-              title="Simular congestión simultánea en múltiples arterias (escalabilidad horizontal RabbitMQ)"
-            >
-              ⚡ Congestión Concurrente
-            </button>
-            <button
-              type="button"
-              id="btn-normal-traffic"
-              className={`btn-hud-sim ${simulationMode === 'normal' ? 'active-neutral' : ''}`}
-              onClick={handleResetNormal}
-            >
-              Estado Mixto
-            </button>
-            <div className="hud-batch-column">
-              <button
-                type="button"
-                id="btn-next-batch"
-                className="btn-hud-sim batch-btn"
-                onClick={handleSimulateBatch}
-                disabled={isFaultTolerantDemoMode}
-              >
-                ↻ Procesar Nuevo Frame Batch
-              </button>
-              <button
-                type="button"
-                id="btn-auto-batch"
-                className={`btn-hud-sim auto-batch-btn ${isAutoBatchActive ? 'is-running' : ''}`}
-                onClick={() => setIsAutoBatchActive((prev) => !prev)}
-                disabled={isFaultTolerantDemoMode}
-                title="Procesar automáticamente un nuevo frame batch cada 1 segundo"
-              >
-                {isAutoBatchActive ? (
-                  <>
-                    <span className="auto-live-dot" /> ⏸ Detener Auto (1s)
-                  </>
-                ) : (
-                  '⏱ Auto: Procesar cada 1s'
-                )}
-              </button>
-            </div>
-          </div>
-
-          {/* Bottom Floating Quick Selector Strip */}
-          <div className="waze-bottom-camera-strip">
-            {visibleIntersections.map((item) => {
-              const isSelected = item.id === selectedIntersectionId;
-              return (
-                <button
-                  key={item.id}
-                  type="button"
-                  className={`camera-mini-pill status-${item.status} ${
-                    isSelected ? 'selected' : ''
-                  }`}
-                  onClick={() =>
-                    isSelected ? onCloseDetail() : onSelectIntersection(item.id)
-                  }
-                  data-testid={`intersection-card-${item.id}`}
-                >
-                  <span className="mini-pill-dot" />
-                  <span className="mini-pill-name">{item.name}</span>
-                  <strong className="mini-pill-count">{item.vehicleCount}</strong>
-                </button>
-              );
-            })}
-          </div>
+          <SimulationToolbar
+            simulationMode={simulationMode}
+            isAutoBatchActive={isAutoBatchActive}
+            isDisabled={isFaultTolerantDemoMode}
+            compact={isSplitOpen}
+            onTriggerConcurrent={handleTriggerConcurrentCongestion}
+            onResetMixed={handleResetNormal}
+            onProcessBatch={handleSimulateBatch}
+            onToggleAutoBatch={() => setIsAutoBatchActive((prev) => !prev)}
+          />
 
           {isLoading ? (
-            <div className="map-loading-overlay">
-              <div className="spinner-lg" />
-              <p>Cargando cartografía de Montevideo y telemetría BFF FastAPI...</p>
+            <div className="map-loading">
+              <span className="spinner" />
+              CARGANDO TELEMETRÍA BFF · MONTEVIDEO
             </div>
           ) : (
-            <MontevideoTrafficMap
+            <TrafficMap
               intersections={visibleIntersections}
               selectedIntersectionId={selectedIntersectionId}
               onSelectIntersection={onSelectIntersection}
@@ -250,15 +137,14 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           )}
         </section>
 
-        {/* RIGHT PANE: Sliding Apple-style Split-Screen Analytical Detail */}
         <section
-          className={`detail-pane-right ${isSplitOpen ? 'open' : 'closed'}`}
+          className={`inspector-pane ${isSplitOpen ? 'open' : ''}`}
           aria-hidden={!isSplitOpen}
         >
           {selectedIntersectionId && (
-            <IntersectionDetailView
+            <NodeDetailPanel
               intersectionId={selectedIntersectionId}
-              onBackToDashboard={onCloseDetail}
+              onClose={onCloseDetail}
               refreshTrigger={refreshCounter}
             />
           )}
