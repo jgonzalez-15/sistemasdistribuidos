@@ -62,24 +62,29 @@ export async function loginWithBff(credentials: LoginCredentials): Promise<UserS
     );
   }
 
-  // Optional attempt against real BFF endpoint (non-blocking fallback to MVP mock)
+  // Optional attempt against real BFF endpoint (/login from api-rest & /auth/login fallback)
   try {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 800);
 
-    const response = await fetch(`${API_REST_URL}/auth/login`, {
+    const response = await fetch(`${API_REST_URL}/login`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ username: normalizedUser, password, role }),
+      body: JSON.stringify({
+        user: normalizedUser,
+        username: normalizedUser,
+        password,
+        role,
+      }),
       signal: controller.signal,
     });
     clearTimeout(timeout);
 
     if (response.ok) {
-      const data = await response.json();
-      if (data.access_token) {
+      const data = await response.json().catch(() => null);
+      if (data && data.access_token) {
         const session: UserSession = {
-          username: data.username || username.trim(),
+          username: data.username || data.user || username.trim(),
           role: data.role || role || 'Operador',
           token: data.access_token,
           issuedAt: new Date().toLocaleTimeString(),
