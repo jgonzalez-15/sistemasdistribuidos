@@ -2597,3 +2597,268 @@ code {
     display: none;
   }
 }
+
+.login-theme-btn {
+  position: absolute;
+  top: 16px;
+  right: 24px;
+  background: var(--surface-elevated);
+  border: 1px solid var(--border);
+}
+
+/* ==========================================================================
+   LIGHT MODE ("MODO CLARO") — PRECISION ALABASTER TELEMETRY
+   ========================================================================== */
+:root[data-theme='light'] {
+  /* Surfaces */
+  --canvas: #f8fafc;
+  --canvas-raised: #ffffff;
+  --surface-glass: rgba(255, 255, 255, 0.88);
+  --surface-elevated: #f1f5f9;
+  --surface-hover: #e2e8f0;
+
+  /* Borders */
+  --border: rgba(15, 23, 42, 0.09);
+  --border-strong: rgba(15, 23, 42, 0.16);
+  --border-input: rgba(15, 23, 42, 0.15);
+
+  /* Text */
+  --text-primary: #0f172a;
+  --text-secondary: #475569;
+  --text-tertiary: #64748b;
+
+  /* Semantic */
+  --critical: #dc2626;
+  --moderate: #d97706;
+  --fluid: #059669;
+  --accent: #2563eb;
+  --accent-strong: #1d4ed8;
+}
+
+[data-theme='light'] .glass {
+  box-shadow: 0 12px 32px rgba(15, 23, 42, 0.08), 0 2px 6px rgba(15, 23, 42, 0.04);
+}
+
+[data-theme='light'] [data-tooltip]::after {
+  background: #ffffff;
+  color: var(--text-primary);
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.12);
+}
+
+[data-theme='light'] .inspector-pane,
+[data-theme='light'] .node-list,
+[data-theme='light'] .sys-workspace {
+  scrollbar-color: rgba(15, 23, 42, 0.16) transparent;
+}
+
+/* Map Canvas & Markers in Light Mode */
+[data-theme='light'] .map-canvas .leaflet-tile-pane {
+  filter: grayscale(85%) contrast(98%) brightness(102%);
+}
+
+[data-theme='light'] .leaflet-control-zoom.leaflet-bar {
+  box-shadow: 0 6px 16px rgba(15, 23, 42, 0.1) !important;
+}
+
+[data-theme='light'] .leaflet-control-attribution {
+  background: rgba(255, 255, 255, 0.82) !important;
+  color: var(--text-tertiary) !important;
+}
+
+[data-theme='light'] .tm-marker {
+  background: #ffffff;
+  box-shadow: 0 0 0 3px var(--c-soft), 0 4px 12px rgba(15, 23, 42, 0.16);
+}
+[data-theme='light'] .tm-marker.is-selected {
+  box-shadow: 0 0 0 3px var(--c-soft), 0 0 0 5px rgba(37, 99, 235, 0.45), 0 6px 18px rgba(15, 23, 42, 0.22);
+}
+[data-theme='light'] .tm-marker-core {
+  color: #ffffff;
+}
+
+[data-theme='light'] .tm-hover-card {
+  background: rgba(255, 255, 255, 0.96);
+  box-shadow: 0 12px 28px rgba(15, 23, 42, 0.14);
+}
+
+/* Inspector & Chart in Light Mode */
+[data-theme='light'] .inspector-bar {
+  background: rgba(248, 250, 252, 0.92);
+}
+
+[data-theme='light'] .chart-tooltip {
+  background: rgba(255, 255, 255, 0.96);
+  box-shadow: 0 8px 20px rgba(15, 23, 42, 0.12);
+}
+
+[data-theme='light'] .legend-swatch.dashed {
+  border-top-color: rgba(15, 23, 42, 0.35);
+}
+
+/* Login View & Unlabeled Architectural Map in Light Mode */
+[data-theme='light'] .btn-primary:hover:not(:disabled) {
+  background: #1e293b;
+}
+
+[data-theme='light'] .quickfill-btn {
+  text-decoration-color: rgba(15, 23, 42, 0.2);
+}
+[data-theme='light'] .quickfill-btn:hover {
+  text-decoration-color: rgba(15, 23, 42, 0.6);
+}
+
+[data-theme='light'] .login-charcoal-map {
+  background: #f1f5f9;
+}
+[data-theme='light'] .login-charcoal-map .leaflet-tile-pane {
+  filter: grayscale(100%) invert(100%) contrast(155%) brightness(104%);
+}
+[data-theme='light'] .login-visual-vignette {
+  background:
+    radial-gradient(ellipse at 52% 46%, transparent 38%, rgba(248, 250, 252, 0.78) 92%),
+    linear-gradient(to bottom, rgba(248, 250, 252, 0.7), transparent 16%, transparent 70%, rgba(248, 250, 252, 0.95));
+}
+[data-theme='light'] .login-map-node-tag {
+  color: #334155;
+  background: rgba(255, 255, 255, 0.88);
+  border-color: rgba(15, 23, 42, 0.12);
+  box-shadow: 0 2px 6px rgba(15, 23, 42, 0.08);
+}
+[data-theme='light'] .login-visual-watermark {
+  color: rgba(15, 23, 42, 0.16);
+}
+[data-theme='light'] .endpoint-footer {
+  background: rgba(255, 255, 255, 0.88);
+}
+
+/* Admin System Deployment View in Light Mode */
+[data-theme='light'] .sys-subheader {
+  background: rgba(248, 250, 252, 0.92);
+}
+
+[data-theme='light'] .sys-section-head {
+  background: #f1f5f9;
+}
+
+[data-theme='light'] .sys-diagram-stage {
+  background: #f8fafc;
+}
+
+[data-theme='light'] .sys-diagram-legend {
+  background: #f1f5f9;
+}
+
+[data-theme='light'] .legend-slow-badge {
+  background: rgba(2, 132, 199, 0.1);
+  border-color: rgba(2, 132, 199, 0.35);
+  color: #0284c7;
+}
+
+[data-theme='light'] .sim-btn.active.slowmo-active {
+  border-color: rgba(2, 132, 199, 0.45);
+  background: rgba(2, 132, 199, 0.1);
+  color: #0284c7;
+}
+[data-theme='light'] .sim-btn.active.slowmo-active svg {
+  color: #0284c7;
+}
+
+[data-theme='light'] .sys-grid-line {
+  stroke: rgba(15, 23, 42, 0.045);
+}
+
+[data-theme='light'] .sys-arrow-head {
+  fill: rgba(15, 23, 42, 0.38);
+}
+
+[data-theme='light'] .sys-swimlane-box {
+  fill: rgba(255, 255, 255, 0.65);
+  stroke: rgba(15, 23, 42, 0.12);
+}
+
+[data-theme='light'] .sys-lane-label {
+  fill: #64748b;
+}
+
+[data-theme='light'] .sys-wire-path:not(.highlighted):not(.blocked) {
+  stroke: rgba(15, 23, 42, 0.24);
+}
+
+[data-theme='light'] .sys-wire-terminal:not(.highlighted) {
+  fill: rgba(15, 23, 42, 0.35);
+}
+
+[data-theme='light'] .sys-wire-label {
+  stroke: #f8fafc;
+}
+[data-theme='light'] .sys-wire-label:not(.highlighted):not(.blocked) {
+  fill: #475569;
+}
+[data-theme='light'] .sys-wire-label.highlighted {
+  fill: #0f172a;
+}
+
+[data-theme='light'] .sys-node-card-body {
+  fill: #ffffff;
+}
+[data-theme='light'] .sys-node-card-body:not(.has-state-border) {
+  stroke: rgba(15, 23, 42, 0.16);
+}
+
+[data-theme='light'] .sys-node-card-header {
+  fill: #f1f5f9;
+}
+
+[data-theme='light'] .sys-node-container {
+  fill: #1e293b;
+}
+
+[data-theme='light'] .sys-node-port {
+  fill: #64748b;
+}
+
+[data-theme='light'] .sys-node-title {
+  fill: #0f172a;
+}
+
+[data-theme='light'] .sys-node-tech {
+  fill: #64748b;
+}
+
+[data-theme='light'] .sys-node-pill-bg.idle {
+  fill: #f1f5f9;
+}
+
+[data-theme='light'] .sys-node-metric.idle {
+  fill: #475569;
+}
+[data-theme='light'] .sys-node-metric.processing {
+  fill: #059669;
+}
+
+[data-theme='light'] .sys-packet-badge-bg {
+  fill: rgba(255, 255, 255, 0.96);
+}
+
+[data-theme='light'] .sys-packet-label {
+  fill: #0f172a;
+}
+
+[data-theme='light'] .sys-terminal {
+  background: #f8fafc;
+  scrollbar-color: rgba(15, 23, 42, 0.16) transparent;
+}
+
+[data-theme='light'] .sys-log-line {
+  border-bottom-color: rgba(15, 23, 42, 0.05);
+}
+[data-theme='light'] .sys-log-line:hover {
+  background: rgba(15, 23, 42, 0.03);
+}
+[data-theme='light'] .sys-log-svc.svc-api-rest { color: #2563eb; border-color: rgba(37, 99, 235, 0.3); }
+[data-theme='light'] .sys-log-svc.svc-auth-service { color: #9333ea; border-color: rgba(147, 51, 234, 0.3); }
+[data-theme='light'] .sys-log-svc.svc-cv-module { color: #059669; border-color: rgba(5, 150, 105, 0.3); }
+[data-theme='light'] .sys-log-svc.svc-edge-proc { color: #0284c7; border-color: rgba(2, 132, 199, 0.3); }
+[data-theme='light'] .sys-log-svc.svc-rabbitmq { color: #d97706; border-color: rgba(217, 119, 6, 0.35); }
+[data-theme='light'] .sys-log-svc.svc-monitoring { color: #475569; }
+

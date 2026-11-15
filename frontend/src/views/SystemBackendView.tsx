@@ -543,30 +543,6 @@ export const SystemBackendView: React.FC<SystemBackendViewProps> = ({
     return () => clearScheduledTimers();
   }, []);
 
-  // Poll real /api/system/health from api-rest (Admin-only)
-  useEffect(() => {
-    let mounted = true;
-    const pollHealth = async () => {
-      const services = await fetchSystemHealthFromBff();
-      if (!mounted || !services) return;
-      const summary = Object.entries(services)
-        .map(([name, info]: [string, any]) => `${name}:${info?.status || 'unknown'}`)
-        .join(' · ');
-      appendLog(
-        'api-rest',
-        'INFO',
-        `GET /api/system/health -> ${summary}`,
-        'logs_queue'
-      );
-    };
-    void pollHealth();
-    const timer = window.setInterval(() => void pollHealth(), 10000);
-    return () => {
-      mounted = false;
-      window.clearInterval(timer);
-    };
-  }, [appendLog]);
-
   // Delta-time animation loop so toggling 5% Slow-Mo immediately slows down packets mid-flight
   useEffect(() => {
     let rafId: number;
@@ -670,6 +646,30 @@ export const SystemBackendView: React.FC<SystemBackendViewProps> = ({
     },
     []
   );
+
+  // Poll real /api/system/health from api-rest (Admin-only)
+  useEffect(() => {
+    let mounted = true;
+    const pollHealth = async () => {
+      const services = await fetchSystemHealthFromBff();
+      if (!mounted || !services) return;
+      const summary = Object.entries(services)
+        .map(([name, info]: [string, any]) => `${name}:${info?.status || 'unknown'}`)
+        .join(' · ');
+      appendLog(
+        'API-REST',
+        'INFO',
+        'logs_queue',
+        `GET /api/system/health -> ${summary}`
+      );
+    };
+    void pollHealth();
+    const timer = window.setInterval(() => void pollHealth(), 10000);
+    return () => {
+      mounted = false;
+      window.clearInterval(timer);
+    };
+  }, [appendLog]);
 
   // Flow 1: Camera Frame Ingestion -> S3 + RabbitMQ -> CV Worker -> Results DB -> Visualization & Logs
   const triggerCameraPipelineFlow = useCallback(() => {
@@ -955,6 +955,7 @@ export const SystemBackendView: React.FC<SystemBackendViewProps> = ({
                   <path
                     d="M 28 0 L 0 0 0 28"
                     fill="none"
+                    className="sys-grid-line"
                     stroke="rgba(255,255,255,0.03)"
                     strokeWidth="1"
                   />
@@ -975,7 +976,7 @@ export const SystemBackendView: React.FC<SystemBackendViewProps> = ({
                   markerHeight="5"
                   orient="auto-start-reverse"
                 >
-                  <path d="M 0 1.5 L 8 5 L 0 8.5 z" fill="rgba(255,255,255,0.32)" />
+                  <path d="M 0 1.5 L 8 5 L 0 8.5 z" className="sys-arrow-head" fill="rgba(255,255,255,0.32)" />
                 </marker>
               </defs>
 
@@ -990,6 +991,7 @@ export const SystemBackendView: React.FC<SystemBackendViewProps> = ({
                   width="1284"
                   height="136"
                   rx="8"
+                  className="sys-swimlane-box"
                   fill="rgba(255,255,255,0.01)"
                   stroke="rgba(255,255,255,0.05)"
                   strokeDasharray="4 6"
@@ -1004,6 +1006,7 @@ export const SystemBackendView: React.FC<SystemBackendViewProps> = ({
                   width="1284"
                   height="146"
                   rx="8"
+                  className="sys-swimlane-box"
                   fill="rgba(255,255,255,0.012)"
                   stroke="rgba(255,255,255,0.05)"
                   strokeDasharray="4 6"
@@ -1018,6 +1021,7 @@ export const SystemBackendView: React.FC<SystemBackendViewProps> = ({
                   width="1284"
                   height="146"
                   rx="8"
+                  className="sys-swimlane-box"
                   fill="rgba(255,255,255,0.01)"
                   stroke="rgba(255,255,255,0.05)"
                   strokeDasharray="4 6"
@@ -1065,6 +1069,9 @@ export const SystemBackendView: React.FC<SystemBackendViewProps> = ({
                     <path
                       d={d}
                       fill="none"
+                      className={`sys-wire-path ${isHighlighted ? 'highlighted' : ''} ${
+                        isBlockedCvLink ? 'blocked' : ''
+                      }`}
                       stroke={
                         isBlockedCvLink
                           ? '#EF4444'
@@ -1097,12 +1104,14 @@ export const SystemBackendView: React.FC<SystemBackendViewProps> = ({
                       cx={startPt[0]}
                       cy={startPt[1]}
                       r={isHighlighted ? 3.5 : 2.2}
+                      className={`sys-wire-terminal ${isHighlighted ? 'highlighted' : ''}`}
                       fill={isHighlighted ? link.color : 'rgba(255,255,255,0.35)'}
                     />
                     <circle
                       cx={endPt[0]}
                       cy={endPt[1]}
                       r={isHighlighted ? 3.5 : 2.2}
+                      className={`sys-wire-terminal ${isHighlighted ? 'highlighted' : ''}`}
                       fill={isHighlighted ? link.color : 'rgba(255,255,255,0.35)'}
                     />
 
@@ -1112,7 +1121,9 @@ export const SystemBackendView: React.FC<SystemBackendViewProps> = ({
                         x="0"
                         y="0"
                         textAnchor="middle"
-                        className="sys-wire-label"
+                        className={`sys-wire-label ${isHighlighted ? 'highlighted' : ''} ${
+                          isBlockedCvLink ? 'blocked' : ''
+                        }`}
                         fill={
                           isBlockedCvLink
                             ? '#EF4444'
@@ -1186,6 +1197,11 @@ export const SystemBackendView: React.FC<SystemBackendViewProps> = ({
                       width={CARD_W}
                       height={CARD_H}
                       rx="7"
+                      className={`sys-node-card-body ${
+                        isCvDegraded || isQueueRetaining || isSelected || isProcessing
+                          ? 'has-state-border'
+                          : ''
+                      }`}
                       fill="#111114"
                       stroke={borderColor}
                       strokeWidth={isSelected || isProcessing ? '1.6' : '1'}
@@ -1198,6 +1214,7 @@ export const SystemBackendView: React.FC<SystemBackendViewProps> = ({
                       width={CARD_W - 2}
                       height="23"
                       rx="6"
+                      className="sys-node-card-header"
                       fill="rgba(255,255,255,0.03)"
                     />
 
@@ -1236,6 +1253,9 @@ export const SystemBackendView: React.FC<SystemBackendViewProps> = ({
                       width={CARD_W - 18}
                       height="15"
                       rx="3"
+                      className={`sys-node-pill-bg ${
+                        isCvDegraded ? 'degraded' : isProcessing ? 'processing' : 'idle'
+                      }`}
                       fill={
                         isCvDegraded
                           ? 'rgba(239,68,68,0.15)'
@@ -1247,7 +1267,9 @@ export const SystemBackendView: React.FC<SystemBackendViewProps> = ({
                     <text
                       x="15"
                       y="73.5"
-                      className="sys-node-metric"
+                      className={`sys-node-metric ${
+                        isCvDegraded ? 'degraded' : isProcessing ? 'processing' : 'idle'
+                      }`}
                       fill={
                         isCvDegraded
                           ? '#EF4444'
@@ -1286,6 +1308,7 @@ export const SystemBackendView: React.FC<SystemBackendViewProps> = ({
                         width="104"
                         height="16"
                         rx="3"
+                        className="sys-packet-badge-bg"
                         fill="rgba(9, 9, 11, 0.94)"
                         stroke={pkt.color}
                         strokeWidth="1"

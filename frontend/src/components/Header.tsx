@@ -1,9 +1,10 @@
 import React from 'react';
-import { LogOut, Server } from 'lucide-react';
+import { LogOut, Moon, Server, Sun } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { API_REST_URL } from '../config';
 
 export type ViewMode = 'map' | 'split' | 'system';
+export type ThemeMode = 'dark' | 'light';
 
 interface HeaderProps {
   viewMode: ViewMode;
@@ -11,6 +12,8 @@ interface HeaderProps {
   onNavigateHome: () => void;
   isFaultTolerantDemoMode: boolean;
   onToggleFaultTolerance: () => void;
+  theme: ThemeMode;
+  onToggleTheme: () => void;
 }
 
 export const BrandMark: React.FC<{ size?: number }> = ({ size = 18 }) => (
@@ -28,6 +31,8 @@ export const Header: React.FC<HeaderProps> = ({
   onNavigateHome,
   isFaultTolerantDemoMode,
   onToggleFaultTolerance,
+  theme,
+  onToggleTheme,
 }) => {
   const { session, logout } = useAuth();
   const initials = session?.username.slice(0, 2).toUpperCase() ?? '··';
@@ -109,6 +114,17 @@ export const Header: React.FC<HeaderProps> = ({
             <span className={`user-role ${isAdmin ? 'is-admin' : ''}`}>{session.role}</span>
           </div>
         )}
+
+        <button
+          type="button"
+          className="icon-btn"
+          onClick={onToggleTheme}
+          id="theme-toggle-button"
+          aria-label={theme === 'light' ? 'Cambiar a modo oscuro' : 'Cambiar a modo claro'}
+          data-tooltip={theme === 'light' ? 'Modo oscuro' : 'Modo claro'}
+        >
+          {theme === 'light' ? <Moon size={15} strokeWidth={1.75} /> : <Sun size={15} strokeWidth={1.75} />}
+        </button>
 
         <button
           type="button"

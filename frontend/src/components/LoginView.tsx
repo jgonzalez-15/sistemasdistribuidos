@@ -1,15 +1,17 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
-import { AlertCircle, ArrowRight, Eye, EyeOff, Lock, User } from 'lucide-react';
+import { AlertCircle, ArrowRight, Eye, EyeOff, Lock, Moon, Sun, User } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { UserRole } from '../types/traffic';
 import { API_REST_URL, AUTH_SERVICE_URL } from '../config';
 import { INITIAL_INTERSECTIONS_MOCK } from '../mocks/trafficMockData';
-import { BrandMark } from './Header';
+import { BrandMark, ThemeMode } from './Header';
 
 interface LoginViewProps {
   onLoginSuccess: () => void;
+  theme?: ThemeMode;
+  onToggleTheme?: () => void;
 }
 
 type EndpointState = 'checking' | 'online' | 'offline';
@@ -138,7 +140,11 @@ const LoginCharcoalMap: React.FC = () => {
   return <div ref={containerRef} className="login-charcoal-map" data-testid="login-charcoal-map" />;
 };
 
-export const LoginView: React.FC<LoginViewProps> = ({ onLoginSuccess }) => {
+export const LoginView: React.FC<LoginViewProps> = ({
+  onLoginSuccess,
+  theme = 'dark',
+  onToggleTheme,
+}) => {
   const { login, isLoading, error, clearError } = useAuth();
   const [username, setUsername] = useState<string>('operador.montevideo');
   const [password, setPassword] = useState<string>('urbano2026');
@@ -177,6 +183,19 @@ export const LoginView: React.FC<LoginViewProps> = ({ onLoginSuccess }) => {
           <BrandMark size={16} />
           SGTU<span className="sep"> // </span>MONTEVIDEO
         </div>
+
+        {onToggleTheme && (
+          <button
+            type="button"
+            id="login-theme-toggle"
+            className="icon-btn login-theme-btn"
+            onClick={onToggleTheme}
+            title={theme === 'dark' ? 'Cambiar a Modo Claro' : 'Cambiar a Modo Oscuro'}
+            aria-label={theme === 'dark' ? 'Activar modo claro' : 'Activar modo oscuro'}
+          >
+            {theme === 'dark' ? <Sun size={14} strokeWidth={1.75} /> : <Moon size={14} strokeWidth={1.75} />}
+          </button>
+        )}
 
         <div className="login-form-wrap">
           <div className="login-emblem">
