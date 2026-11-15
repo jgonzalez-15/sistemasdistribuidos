@@ -119,11 +119,17 @@ services:
   edge-processor:
     build: ./edge-processor
     container_name: edge-processor
+    restart: unless-stopped
     ports:
       - "${EDGE_PROCESSOR_PORT:-8001}:8001"
     environment:
       SERVICE_NAME: edge-processor
       SERVICE_PORT: 8001
+      # Cámaras que simula esta instancia (una instancia por zona). CAMERA_RANGE, si se define, reemplaza a CAMERA_IDS.
+      CAMERA_IDS: ${CAMERA_IDS:-cam-1:int-1,cam-2:int-1,cam-3:int-2,cam-4:int-2,cam-5:int-3,cam-6:int-3}
+      CAMERA_RANGE: ${CAMERA_RANGE:-}
+      FRAME_INTERVAL: ${FRAME_INTERVAL:-5}
+      EDGE_THREADS: ${EDGE_THREADS:-4}
       CAMERA_QUEUE_HOST: ${CAMERA_QUEUE_HOST:-camera-queue}
       CAMERA_QUEUE_PORT: 5672
       CAMERA_QUEUE_USER: ${CAMERA_QUEUE_USER:-guest}
@@ -149,12 +155,14 @@ services:
 
   cv-module:
     build: ./cv-module
-    container_name: cv-module
-    ports:
-      - "${CV_MODULE_PORT:-8002}:8002"
+    # Sin container_name ni ports: se escala con `docker compose up --scale cv-module=N`.
+    # Los demás servicios lo alcanzan por DNS interno en http://cv-module:8002.
+    restart: unless-stopped
     environment:
       SERVICE_NAME: cv-module
       SERVICE_PORT: 8002
+      # Demora artificial por clip (ms), solo para que en la demo de escalado se vea bajar la cola.
+      PROCESSING_DELAY_MS: ${PROCESSING_DELAY_MS:-0}
       CAMERA_QUEUE_HOST: ${CAMERA_QUEUE_HOST:-camera-queue}
       CAMERA_QUEUE_PORT: 5672
       CAMERA_QUEUE_USER: ${CAMERA_QUEUE_USER:-guest}
