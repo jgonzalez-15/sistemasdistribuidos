@@ -543,30 +543,6 @@ export const SystemBackendView: React.FC<SystemBackendViewProps> = ({
     return () => clearScheduledTimers();
   }, []);
 
-  // Poll real /api/system/health from api-rest (Admin-only)
-  useEffect(() => {
-    let mounted = true;
-    const pollHealth = async () => {
-      const services = await fetchSystemHealthFromBff();
-      if (!mounted || !services) return;
-      const summary = Object.entries(services)
-        .map(([name, info]: [string, any]) => `${name}:${info?.status || 'unknown'}`)
-        .join(' · ');
-      appendLog(
-        'api-rest',
-        'INFO',
-        `GET /api/system/health -> ${summary}`,
-        'logs_queue'
-      );
-    };
-    void pollHealth();
-    const timer = window.setInterval(() => void pollHealth(), 10000);
-    return () => {
-      mounted = false;
-      window.clearInterval(timer);
-    };
-  }, [appendLog]);
-
   // Delta-time animation loop so toggling 5% Slow-Mo immediately slows down packets mid-flight
   useEffect(() => {
     let rafId: number;
@@ -670,6 +646,30 @@ export const SystemBackendView: React.FC<SystemBackendViewProps> = ({
     },
     []
   );
+
+  // Poll real /api/system/health from api-rest (Admin-only)
+  useEffect(() => {
+    let mounted = true;
+    const pollHealth = async () => {
+      const services = await fetchSystemHealthFromBff();
+      if (!mounted || !services) return;
+      const summary = Object.entries(services)
+        .map(([name, info]: [string, any]) => `${name}:${info?.status || 'unknown'}`)
+        .join(' · ');
+      appendLog(
+        'API-REST',
+        'INFO',
+        'logs_queue',
+        `GET /api/system/health -> ${summary}`
+      );
+    };
+    void pollHealth();
+    const timer = window.setInterval(() => void pollHealth(), 10000);
+    return () => {
+      mounted = false;
+      window.clearInterval(timer);
+    };
+  }, [appendLog]);
 
   // Flow 1: Camera Frame Ingestion -> S3 + RabbitMQ -> CV Worker -> Results DB -> Visualization & Logs
   const triggerCameraPipelineFlow = useCallback(() => {
