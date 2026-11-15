@@ -73,3 +73,51 @@ Cada decisión registra:
 - **Trade-off aceptado:** recrear el broker **borra los mensajes encolados**. Es aceptable en desarrollo y en las demos, no en producción. Además, al recrearlo apareció una vez un fallo transitorio de arranque: `.erlang.cookie: eacces`, por la cookie con dueño `root`. Se resolvió repitiendo el comando.
 - **Cómo afecta:** cualquier cambio en `definitions.json` exige `docker compose rm -sfv camera-queue && docker compose up -d camera-queue` (está en el README). Los mensajes `durable` sí sobreviven a un reinicio normal (`docker compose restart camera-queue`), porque el volumen se conserva.
 - **Alternativa descartada:** cambiar los argumentos en caliente con una *policy* (`rabbitmqctl set_policy ... dead-letter-exchange`). No obliga a recrear nada, pero deja la configuración fuera de `definitions.json`, salvo que la policy también se agregue ahí.
+
+## D10. El edge escala por zonas: una instancia por grupo de cámaras, repartidas por configuración
+- **Por qué:** el sistema está pensado para una ciudad, con cientos de cámaras. En la realidad hay un edge por zona, cerca de sus cámaras. El edge no guarda estado, así que sumar zonas es sumar instancias con otro `CAMERA_IDS` (o `CAMERA_RANGE`), sin tocar código. Dentro de cada instancia, un pool de `EDGE_THREADS` hilos reparte las cámaras. Cada hilo tiene su propia conexión pika, porque la conexión no se puede compartir entre hilos.
+- **Fuente:** Tema 1.2 p.19 (escalabilidad geográfica y de tamaño). Tema 2.0 p.7 (III, configuración por entorno) y p.14 (VIII, concurrencia por procesos). EDA-AWS p.2 (servicios que escalan y fallan de forma independiente).
+- **Estimación de capacidad** (sin medir todavía; la prueba de carga va al punto 8): con 500 cámaras y un clip cada 5 s hay 100 clips/s. RabbitMQ (~300 bytes por mensaje) y PostgreSQL (100 inserts/s) sobran. Los workers escalan con `--scale`. MinIO recibe ~19 MB/s, unos 1,6 TB por día, así que la **retención** pasa a ser necesaria.
+- **Trade-off aceptado:**
+  - **Reparto estático:** sumar cámaras a una zona obliga a reiniciar su edge. Se pierden 1 o 2 clips por cámara de esa zona (unos 5 a 10 s), algo irrelevante para una congestión que se mide por minutos.
+  - **Si un edge se cae, sus cámaras quedan sin datos** hasta que vuelva. Nadie toma esas cámaras, y lo que no se capturó no se recupera, porque no hay buffer local. El impacto es **local**: las otras zonas, los workers y el dashboard siguen andando.
+  - El pool de hilos suma complejidad: una conexión por hilo.
+- **Cómo afecta:**
+  - Si una ronda tarda más que `FRAME_INTERVAL`, el edge loguea `edge_lagging`: es la señal de que esa zona necesita otra instancia.
+  - **Hernán:** "sin datos" no es "sin congestión". El dashboard tiene que mostrar la hora del último dato y marcar las intersecciones sin clips recientes.
+  - **Ro:** que una cámara deje de publicar `clip_published` durante N minutos es una alerta.
+- **Alternativa descartada:** asignar cámaras de forma dinámica con un coordinador (ZooKeeper, con líder y nodos efímeros, Tema 6 p.32–42). Las cámaras de un edge caído pasarían a otro, pero es mucho más complejo: queda como **trabajo futuro**.
+
+## D11. `restart: unless-stopped` en `edge-processor` y `cv-module`
+- **Por qué:** si el proceso se cae (una excepción no manejada, falta de memoria), Docker lo vuelve a levantar en segundos sin intervención.
+- **Fuente:** Tema 2.0 p.15 (IX, desechabilidad: los procesos se inician y se detienen en cualquier momento).
+- **Trade-off aceptado:** un error que se repite al arrancar entra en un ciclo de reinicios; se nota en `docker compose ps` y en los logs. No cubre que se caiga la máquina.
+- **Cómo afecta:** en la demo, `docker kill` de un worker cuenta como parada manual, así que Docker no lo relanza y se ve claramente cómo otro worker toma el mensaje.
+- **Alternativa descartada:** healthchecks con reinicio por orquestador (Kubernetes): está fuera del alcance aprobado.
+
+## D12. ACK después del COMMIT, `processed_at` con el reloj de la base y fallos directo a la DLQ
+- **Por qué:**
+  - Si el worker muere después de guardar y antes del ACK, RabbitMQ reentrega el mensaje y `ON CONFLICT DO NOTHING` (D3) evita el duplicado.
+  - Si hiciera el ACK antes de guardar, una caída perdería el resultado.
+  - `processed_at` usa `now()` de PostgreSQL, así todas las réplicas comparten un único reloj.
+- **Fuente:** Tema 4.4 p.8 (ACK manual, *at-least-once*). Tema 2.0 p.15 (un worker debe devolver el trabajo a la cola). Tema 6 p.4–5 y p.17 (los relojes físicos de cada nodo no coinciden). EDA-AWS p.8 (consumidores idempotentes). La base como árbitro único de la escritura es análoga al servidor central de exclusión mutua (Tema 6 p.24). `ON CONFLICT` es **[FUERA DE CLASE]**.
+- **Trade-off aceptado:**
+  - Un duplicado repite el trabajo de CV, aunque no se guarde dos veces.
+  - `ts` (la captura) usa el reloj del edge, que puede no coincidir con el de la base.
+  - **Todo fallo va directo a la DLQ, sin reintentos:** una caída temporal de la base manda clips buenos a `camera_dlq`, y hay que reprocesarlos a mano. El extra 2 (reintentos con contador) lo resuelve.
+- **Cómo afecta:** Hernán ordena el histórico por `ts` (captura). Mirar `camera_dlq` sirve para detectar problemas de infraestructura.
+- **Alternativa descartada:** `requeue=True` ante cualquier error. Un mensaje que no se puede procesar (por ejemplo, un JSON roto) quedaría dando vueltas para siempre.
+
+## D14. Sin buffer local en el edge (*store-and-forward* queda como trabajo futuro)
+- **Por qué:** era una simplificación aprobada. En la demo, el edge y el broker comparten la red de Docker, así que la falla que cubre un buffer (corte del enlace entre la esquina y el centro) no ocurre. Además, el dato de congestión envejece rápido: lo que más importa es el ahora.
+- **Fuente:** decisión del equipo (simplificaciones aprobadas). El patrón *store-and-forward* es **[FUERA DE CLASE]**.
+- **Trade-off aceptado:** **durante una caída de RabbitMQ o de MinIO se pierden los clips de esa zona.** RabbitMQ caído: 4 reintentos (unos 15 s) y el clip se descarta; mientras tanto, ese hilo atrasa a sus otras cámaras (`edge_lagging`). MinIO caído: el clip se pierde enseguida. El histórico queda con huecos.
+- **Cómo afecta:** los huecos se ven como "sin datos" en el dashboard (ver D10). En el informe se presenta como trabajo futuro.
+- **Por qué el diseño ya lo soporta:** reenviar clips viejos no duplica nada, porque `clip_id` hace idempotente el guardado (D3), y un clip que llega tarde queda en su lugar del histórico porque `ts` es el momento de captura (D12). Agregarlo sería un directorio de pendientes en un volumen y un hilo que lo vacía al recuperarse la conexión.
+- **Alternativa descartada (por ahora):** implementarlo. Exige manejar el disco del edge (cuota y qué descartar si se llena) y absorber la ráfaga de clips viejos al recuperarse. Por tiempo se priorizaron los logs (punto 7) y las demos (punto 8).
+
+## D13. `PROCESSING_DELAY_MS`: demora artificial opcional en el worker
+- **Por qué:** el CV simulado es tan rápido (milisegundos) que un solo worker vacía la cola y en la demo no se ve la diferencia entre 1 y 3 workers. Con una demora de, por ejemplo, 500 ms, la cola crece con 1 worker y baja con 3.
+- **Fuente:** decisión para la demo (Tema 1.2 p.21, escalar para repartir la carga).
+- **Trade-off aceptado:** es un parámetro "falso" que no existiría en producción. Por defecto vale 0, y en la demo se dice explícitamente que representa el costo de un modelo real.
+- **Cómo afecta:** solo a la demo de escalado.

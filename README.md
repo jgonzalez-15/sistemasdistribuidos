@@ -89,6 +89,35 @@ Ejemplo:
 
 **Consumo:** ACK manual. El worker confirma recién después de guardar el resultado.
 
+## 2.2 Edge y worker: configuración
+
+**`edge-processor`** simula cámaras: genera clips con NumPy, descarta los frames sin cambios, reduce la resolución, sube el `.npy` a MinIO y publica la metadata con *publisher confirms*.
+
+| Variable | Default | Para qué |
+| :--- | :--- | :--- |
+| `CAMERA_IDS` | `cam-1:int-1,…,cam-6:int-3` | Cámaras de esta instancia (`camara:interseccion`). Una instancia por zona. |
+| `CAMERA_RANGE` | vacío | Por ejemplo `101-300`: genera `cam-101…cam-300` con 2 cámaras por intersección (`int-((N+1)/2)`). Si tiene valor, reemplaza a `CAMERA_IDS`. |
+| `FRAME_INTERVAL` | `5` | Segundos entre clips de una misma cámara. |
+| `EDGE_THREADS` | `4` | Hilos por instancia; cada uno tiene su conexión y su grupo de cámaras. |
+| `FRAMES_PER_CLIP`, `FRAME_HEIGHT`, `FRAME_WIDTH`, `DOWNSCALE`, `DIFF_THRESHOLD`, `PUBLISH_MAX_RETRIES` | `10`, `240`, `320`, `2`, `2.0`, `4` | Simulación y preprocesamiento. |
+
+Para sumar otra zona sin tocar el compose (otra instancia de edge con sus propias cámaras):
+```bash
+docker compose run -d -e CAMERA_RANGE=101-200 edge-processor
+```
+
+**`cv-module`** consume con `prefetch_count=1` y ACK manual, cuenta vehículos con `DetectorSimulado` (`scipy.ndimage.label`; mediana de los conteos por frame), guarda con `INSERT … ON CONFLICT (clip_id) DO NOTHING` y recién ahí hace ACK. Si algo falla, hace `nack(requeue=False)` y el mensaje va a `camera_dlq`.
+
+| Variable | Default | Para qué |
+| :--- | :--- | :--- |
+| `DETECTION_THRESHOLD` | `128` | Umbral de brillo para binarizar el frame. |
+| `MIN_BLOB_AREA` | `4` | Descarta manchas chicas (ruido). |
+| `PROCESSING_DELAY_MS` | `0` | Demora artificial por clip, **solo para la demo de escalado**. Representa el costo de un modelo real. |
+
+**Eventos de log** (JSON en una línea, a stdout): `clip_published`, `clip_processed`, `clip_failed`, `clip_dead_lettered`, `worker_started`, `worker_stopped`, `edge_lagging`, `broker_connect_retry`, `publish_retry` y `worker_reconnecting`.
+
+> Si el puerto 8001 del host está ocupado: `EDGE_PROCESSOR_PORT=18001 docker compose up -d`.
+
 ---
 
 ## 3. How to Run
