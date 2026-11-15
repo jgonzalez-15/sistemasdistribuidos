@@ -1917,6 +1917,37 @@ code {
   border-radius: 50%;
 }
 
+.legend-slow-badge {
+  margin-left: auto;
+  padding: 2px 8px;
+  border-radius: var(--radius-sm);
+  background: rgba(56, 189, 248, 0.14);
+  border: 1px solid rgba(56, 189, 248, 0.4);
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  color: #38bdf8;
+}
+
+.sim-btn.active.slowmo-active {
+  border-color: rgba(56, 189, 248, 0.55);
+  background: rgba(56, 189, 248, 0.12);
+  color: #38bdf8;
+}
+.sim-btn.active.slowmo-active svg {
+  color: #38bdf8;
+}
+
+.sys-wire-highlight-flow {
+  animation: wireAnts 0.9s linear infinite;
+}
+@keyframes wireAnts {
+  to {
+    stroke-dashoffset: -24;
+  }
+}
+
 .sys-diagram-svg {
   display: block;
   width: 100%;
@@ -1935,9 +1966,15 @@ code {
 
 .sys-wire-label {
   font-family: var(--font-mono);
-  font-size: 9px;
+  font-size: 8.5px;
   font-weight: 600;
   letter-spacing: 0.04em;
+  paint-order: stroke;
+  stroke: #08080a;
+  stroke-width: 3.5px;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  pointer-events: none;
 }
 
 .sys-packet-label {

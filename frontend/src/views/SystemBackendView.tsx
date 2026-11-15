@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
+  Gauge,
   Pause,
   Play,
   Send,
@@ -49,7 +50,7 @@ interface DiagramNodeSpec {
   tech: string;
   role: string;
   url?: string;
-  /** SVG center coordinates on a 1260 x 590 canvas */
+  /** SVG center coordinates on a 1320 x 610 planar canvas */
   cx: number;
   cy: number;
 }
@@ -60,8 +61,10 @@ interface DiagramLinkSpec {
   to: NodeId;
   protocol: string;
   color: string;
-  /** Optional control point offset for curved SVG Bezier path */
-  curveOffset?: [number, number];
+  /** Exact edge-to-edge points [x, y] so no wire ever crosses a node or another wire */
+  points: [number, number][];
+  /** Explicit [x, y] position for the protocol label offset cleanly from the wire */
+  labelPos: [number, number];
 }
 
 interface InFlightPacket {
@@ -71,8 +74,10 @@ interface InFlightPacket {
   to: NodeId;
   label: string;
   color: string;
-  startedAt: number;
-  durationMs: number;
+  /** Progress from 0 to 1 along the link path */
+  progress: number;
+  /** Base duration in ms at 1x speed */
+  baseDurationMs: number;
 }
 
 interface DistributedLogEntry {
@@ -84,32 +89,28 @@ interface DistributedLogEntry {
   message: string;
 }
 
+const CARD_W = 204;
+const CARD_H = 84;
+
+/**
+ * Planar 12-Node Topology (Zero edge-edge crossings, zero node-edge overlaps):
+ * - Top Row (y=92):      [auth-db] <--- [auth-service] <--- [api-rest] <---> [frontend]
+ * - Middle Row (y=295):  [edge-processor] ---> [camera-queue] ---> [cv-module] ---> [results-db] ---> [visualization-backend]
+ * - Bottom Row (y=498):  [clips-db]                                [logs-queue] ---> [monitoring-pipeline]
+ */
 const DIAGRAM_NODES: DiagramNodeSpec[] = [
-  // Row 1: Client / BFF / Auth Plane
+  // ROW 1 (y = 92): Security, BFF Gateway & Client Tier
   {
-    id: 'frontend',
-    title: 'React SPA Console',
-    container: 'frontend',
-    port: ':3000',
-    kind: 'client',
-    zone: 'CLIENT TIER',
-    tech: 'React 18 · Vite · Leaflet',
-    role: 'Consola web de supervisión urbana y telemetría',
-    cx: 130,
-    cy: 96,
-  },
-  {
-    id: 'api-rest',
-    title: 'API REST (BFF)',
-    container: 'api-rest',
-    port: ':8000',
-    kind: 'service',
-    zone: 'GATEWAY / BFF',
-    tech: 'FastAPI · Pika · Requests',
-    role: 'POST /login · GET /api/intersections · Publicador logs_queue',
-    url: API_REST_URL,
-    cx: 410,
-    cy: 96,
+    id: 'auth-db',
+    title: 'Auth Database',
+    container: 'auth-db',
+    port: ':5433',
+    kind: 'database',
+    zone: 'SECURITY PERSISTENCE',
+    tech: 'PostgreSQL 16 (auth_db)',
+    role: 'Tabla users · Credenciales y roles de Operador y Administrador',
+    cx: 135,
+    cy: 92,
   },
   {
     id: 'auth-service',
@@ -119,25 +120,38 @@ const DIAGRAM_NODES: DiagramNodeSpec[] = [
     kind: 'service',
     zone: 'SECURITY TIER',
     tech: 'FastAPI · JWT HS256',
-    role: 'Validación de credenciales de Operador/Admin y firma JWT',
+    role: 'Valida credenciales contra auth-db y emite tokens JWT firmados',
     url: AUTH_SERVICE_URL,
-    cx: 790,
-    cy: 96,
+    cx: 395,
+    cy: 92,
   },
   {
-    id: 'auth-db',
-    title: 'Auth Database',
-    container: 'auth-db',
-    port: ':5433',
-    kind: 'database',
-    zone: 'PERSISTENCE',
-    tech: 'PostgreSQL 16 (auth_db)',
-    role: 'Tabla users · Credenciales y roles del sistema',
-    cx: 1110,
-    cy: 96,
+    id: 'api-rest',
+    title: 'API REST (BFF)',
+    container: 'api-rest',
+    port: ':8000',
+    kind: 'service',
+    zone: 'GATEWAY / BFF',
+    tech: 'FastAPI · Pika · Requests',
+    role: 'POST /login · GET /api/intersections · Publicador en logs_queue',
+    url: API_REST_URL,
+    cx: 660,
+    cy: 92,
+  },
+  {
+    id: 'frontend',
+    title: 'React SPA Console',
+    container: 'frontend',
+    port: ':3000',
+    kind: 'client',
+    zone: 'CLIENT TIER',
+    tech: 'React 18 · Vite · Leaflet',
+    role: 'Consola web de supervisión urbana y telemetría de backend',
+    cx: 1185,
+    cy: 92,
   },
 
-  // Row 2: Edge Ingestion -> RabbitMQ -> CV Workers -> PostgreSQL Results
+  // ROW 2 (y = 295): Edge Ingestion -> RabbitMQ -> CV Workers -> Results DB -> Visualization
   {
     id: 'edge-processor',
     title: 'Edge Processor',
@@ -146,9 +160,9 @@ const DIAGRAM_NODES: DiagramNodeSpec[] = [
     kind: 'service',
     zone: 'EDGE INGESTION',
     tech: 'FastAPI · Boto3 · Pika',
-    role: 'Captura clips de cámaras de Montevideo, sube a S3 y encola evento',
+    role: 'Captura clips de cámaras de Montevideo, sube MP4 a S3 y encola evento',
     url: EDGE_PROCESSOR_URL,
-    cx: 130,
+    cx: 135,
     cy: 295,
   },
   {
@@ -159,8 +173,8 @@ const DIAGRAM_NODES: DiagramNodeSpec[] = [
     kind: 'broker',
     zone: 'MESSAGE BROKER #1',
     tech: 'RabbitMQ 3.13 (AMQP)',
-    role: 'Cola durable camera_processing_queue · Desacopla ingesta y CV',
-    cx: 410,
+    role: 'Cola durable camera_processing_queue · Desacopla ingesta y workers CV',
+    cx: 395,
     cy: 295,
   },
   {
@@ -171,9 +185,9 @@ const DIAGRAM_NODES: DiagramNodeSpec[] = [
     kind: 'service',
     zone: 'CV WORKER POOL (x3)',
     tech: 'FastAPI · YOLO/OpenCV',
-    role: 'Consume camera_processing_queue, descarga clip S3 y cuenta vehículos',
+    role: 'Consume camera_processing_queue, procesa video y persiste conteo vehicular',
     url: CV_MODULE_URL,
-    cx: 790,
+    cx: 660,
     cy: 295,
   },
   {
@@ -182,25 +196,11 @@ const DIAGRAM_NODES: DiagramNodeSpec[] = [
     container: 'results-db',
     port: ':5434',
     kind: 'database',
-    zone: 'PERSISTENCE',
+    zone: 'TELEMETRY PERSISTENCE',
     tech: 'PostgreSQL 16 (results_db)',
     role: 'Estado consolidado por intersección y serie temporal histórica',
-    cx: 1110,
+    cx: 925,
     cy: 295,
-  },
-
-  // Row 3: Object Storage / Visualization / Logs Broker / Monitoring Pipeline
-  {
-    id: 'clips-db',
-    title: 'Clips Object Store',
-    container: 'clips-db',
-    port: ':9000',
-    kind: 'object-store',
-    zone: 'OBJECT STORAGE',
-    tech: 'MinIO S3 (s3://clips)',
-    role: 'Almacenamiento de fragmentos de video MP4 crudos',
-    cx: 130,
-    cy: 494,
   },
   {
     id: 'visualization-backend',
@@ -212,8 +212,22 @@ const DIAGRAM_NODES: DiagramNodeSpec[] = [
     tech: 'FastAPI · Psycopg2',
     role: 'Cálculo de saturación, velocidad media y detección de patrón',
     url: VISUALIZATION_BACKEND_URL,
-    cx: 410,
-    cy: 494,
+    cx: 1185,
+    cy: 295,
+  },
+
+  // ROW 3 (y = 498): Object Storage & Distributed Logging / Monitoring
+  {
+    id: 'clips-db',
+    title: 'Clips Object Store',
+    container: 'clips-db',
+    port: ':9000',
+    kind: 'object-store',
+    zone: 'OBJECT STORAGE',
+    tech: 'MinIO S3 (s3://clips)',
+    role: 'Almacenamiento de fragmentos de video MP4 crudos',
+    cx: 135,
+    cy: 498,
   },
   {
     id: 'logs-queue',
@@ -223,9 +237,9 @@ const DIAGRAM_NODES: DiagramNodeSpec[] = [
     kind: 'broker',
     zone: 'MESSAGE BROKER #2',
     tech: 'RabbitMQ 3.13 (AMQP)',
-    role: 'Cola durable logs_queue · Centraliza telemetría y auditoría',
-    cx: 790,
-    cy: 494,
+    role: 'Cola durable logs_queue · Centraliza eventos y auditoría del sistema',
+    cx: 660,
+    cy: 498,
   },
   {
     id: 'monitoring-pipeline',
@@ -237,18 +251,28 @@ const DIAGRAM_NODES: DiagramNodeSpec[] = [
     tech: 'FastAPI · Pika · Httpx',
     role: 'Consumidor de logs_queue y chequeo de salud de contenedores',
     url: MONITORING_PIPELINE_URL,
-    cx: 1110,
-    cy: 494,
+    cx: 925,
+    cy: 498,
   },
 ];
 
+/**
+ * Planar Links: Every wire starts and ends at the exact border of its cards
+ * and routes through open corridors so ZERO wires cross each other or any card.
+ */
 const DIAGRAM_LINKS: DiagramLinkSpec[] = [
+  // Row 1 horizontal links
   {
     id: 'frontend->api-rest',
     from: 'frontend',
     to: 'api-rest',
     protocol: 'HTTP / JSON',
     color: '#3B82F6',
+    points: [
+      [1083, 92],
+      [762, 92],
+    ],
+    labelPos: [922, 75],
   },
   {
     id: 'api-rest->auth-service',
@@ -256,6 +280,11 @@ const DIAGRAM_LINKS: DiagramLinkSpec[] = [
     to: 'auth-service',
     protocol: 'POST /login',
     color: '#A855F7',
+    points: [
+      [558, 92],
+      [497, 92],
+    ],
+    labelPos: [527, 75],
   },
   {
     id: 'auth-service->auth-db',
@@ -263,20 +292,25 @@ const DIAGRAM_LINKS: DiagramLinkSpec[] = [
     to: 'auth-db',
     protocol: 'SQL :5432',
     color: '#A855F7',
+    points: [
+      [293, 92],
+      [237, 92],
+    ],
+    labelPos: [265, 75],
   },
-  {
-    id: 'edge-processor->clips-db',
-    from: 'edge-processor',
-    to: 'clips-db',
-    protocol: 'S3 PUT MP4',
-    color: '#38BDF8',
-  },
+
+  // Row 2 horizontal pipeline links
   {
     id: 'edge-processor->camera-queue',
     from: 'edge-processor',
     to: 'camera-queue',
     protocol: 'AMQP PUB :5672',
     color: '#F59E0B',
+    points: [
+      [237, 295],
+      [293, 295],
+    ],
+    labelPos: [265, 278],
   },
   {
     id: 'camera-queue->cv-module',
@@ -284,6 +318,11 @@ const DIAGRAM_LINKS: DiagramLinkSpec[] = [
     to: 'cv-module',
     protocol: 'AMQP CONSUME',
     color: '#10B981',
+    points: [
+      [497, 295],
+      [558, 295],
+    ],
+    labelPos: [527, 278],
   },
   {
     id: 'cv-module->results-db',
@@ -291,6 +330,11 @@ const DIAGRAM_LINKS: DiagramLinkSpec[] = [
     to: 'results-db',
     protocol: 'SQL INSERT',
     color: '#10B981',
+    points: [
+      [762, 295],
+      [823, 295],
+    ],
+    labelPos: [792, 278],
   },
   {
     id: 'results-db->visualization-backend',
@@ -298,23 +342,25 @@ const DIAGRAM_LINKS: DiagramLinkSpec[] = [
     to: 'visualization-backend',
     protocol: 'SQL SELECT',
     color: '#3B82F6',
-    curveOffset: [0, 55],
+    points: [
+      [1027, 295],
+      [1083, 295],
+    ],
+    labelPos: [1055, 278],
   },
+
+  // Clean vertical / orthogonal links between rows (zero crossings)
   {
-    id: 'visualization-backend->api-rest',
-    from: 'visualization-backend',
-    to: 'api-rest',
-    protocol: 'HTTP :8003',
-    color: '#3B82F6',
-    curveOffset: [-48, 0],
-  },
-  {
-    id: 'api-rest->logs-queue',
-    from: 'api-rest',
-    to: 'logs-queue',
-    protocol: 'AMQP LOG',
-    color: '#F59E0B',
-    curveOffset: [20, 40],
+    id: 'edge-processor->clips-db',
+    from: 'edge-processor',
+    to: 'clips-db',
+    protocol: 'S3 PUT MP4',
+    color: '#38BDF8',
+    points: [
+      [135, 337],
+      [135, 456],
+    ],
+    labelPos: [182, 396],
   },
   {
     id: 'cv-module->logs-queue',
@@ -322,6 +368,11 @@ const DIAGRAM_LINKS: DiagramLinkSpec[] = [
     to: 'logs-queue',
     protocol: 'AMQP LOG',
     color: '#F59E0B',
+    points: [
+      [660, 337],
+      [660, 456],
+    ],
+    labelPos: [704, 396],
   },
   {
     id: 'logs-queue->monitoring-pipeline',
@@ -329,6 +380,42 @@ const DIAGRAM_LINKS: DiagramLinkSpec[] = [
     to: 'monitoring-pipeline',
     protocol: 'AMQP CONSUME :5673',
     color: '#38BDF8',
+    points: [
+      [762, 498],
+      [823, 498],
+    ],
+    labelPos: [792, 481],
+  },
+  {
+    id: 'visualization-backend->api-rest',
+    from: 'visualization-backend',
+    to: 'api-rest',
+    protocol: 'HTTP :8003',
+    color: '#3B82F6',
+    // Cleanly rises from top of visualization-backend into the open corridor at y=162 and enters api-rest bottom-right
+    points: [
+      [1185, 253],
+      [1185, 162],
+      [720, 162],
+      [720, 134],
+    ],
+    labelPos: [955, 149],
+  },
+  {
+    id: 'api-rest->logs-queue',
+    from: 'api-rest',
+    to: 'logs-queue',
+    protocol: 'AMQP LOG :5673',
+    color: '#F59E0B',
+    // Routes cleanly down the open vertical corridor at x=527 (between col 2 and col 3) into the left side of logs-queue
+    points: [
+      [600, 134],
+      [600, 168],
+      [527, 168],
+      [527, 498],
+      [558, 498],
+    ],
+    labelPos: [478, 396],
   },
 ];
 
@@ -337,33 +424,41 @@ const NODE_MAP: Record<NodeId, DiagramNodeSpec> = DIAGRAM_NODES.reduce((acc, n) 
   return acc;
 }, {} as Record<NodeId, DiagramNodeSpec>);
 
-function buildLinkPath(link: DiagramLinkSpec): {
-  d: string;
-  p0: [number, number];
-  p1: [number, number];
-  p2: [number, number];
-} {
-  const src = NODE_MAP[link.from];
-  const dst = NODE_MAP[link.to];
-  const p0: [number, number] = [src.cx, src.cy];
-  const p2: [number, number] = [dst.cx, dst.cy];
-  const midX = (p0[0] + p2[0]) / 2 + (link.curveOffset?.[0] ?? 0);
-  const midY = (p0[1] + p2[1]) / 2 + (link.curveOffset?.[1] ?? 0);
-  const p1: [number, number] = [midX, midY];
-  const d = `M ${p0[0]} ${p0[1]} Q ${p1[0]} ${p1[1]} ${p2[0]} ${p2[1]}`;
-  return { d, p0, p1, p2 };
+function buildPolylineSvgPath(points: [number, number][]): string {
+  return points
+    .map((pt, idx) => `${idx === 0 ? 'M' : 'L'} ${pt[0]} ${pt[1]}`)
+    .join(' ');
 }
 
-function pointOnQuadBezier(
-  p0: [number, number],
-  p1: [number, number],
-  p2: [number, number],
-  t: number
-): [number, number] {
-  const u = 1 - t;
-  const x = u * u * p0[0] + 2 * u * t * p1[0] + t * t * p2[0];
-  const y = u * u * p0[1] + 2 * u * t * p1[1] + t * t * p2[1];
-  return [x, y];
+function pointAlongPolyline(points: [number, number][], t: number): [number, number] {
+  if (points.length === 0) return [0, 0];
+  if (points.length === 1 || t <= 0) return points[0];
+  if (t >= 1) return points[points.length - 1];
+
+  const segLengths: number[] = [];
+  let totalLen = 0;
+  for (let i = 0; i < points.length - 1; i++) {
+    const dx = points[i + 1][0] - points[i][0];
+    const dy = points[i + 1][1] - points[i][1];
+    const len = Math.hypot(dx, dy);
+    segLengths.push(len);
+    totalLen += len;
+  }
+
+  if (totalLen === 0) return points[0];
+  const targetDist = t * totalLen;
+  let acc = 0;
+  for (let i = 0; i < segLengths.length; i++) {
+    const segLen = segLengths[i];
+    if (acc + segLen >= targetDist) {
+      const localT = segLen === 0 ? 0 : (targetDist - acc) / segLen;
+      const x = points[i][0] + (points[i + 1][0] - points[i][0]) * localT;
+      const y = points[i][1] + (points[i + 1][1] - points[i][1]) * localT;
+      return [x, y];
+    }
+    acc += segLen;
+  }
+  return points[points.length - 1];
 }
 
 function formatJoacoTimestamp(d: Date): string {
@@ -377,10 +472,17 @@ export const SystemBackendView: React.FC<SystemBackendViewProps> = ({
   isFaultTolerantDemoMode,
   onToggleFaultTolerance,
 }) => {
-  const [selectedNodeId, setSelectedNodeId] = useState<NodeId>('camera-queue');
+  const [selectedNodeId, setSelectedNodeId] = useState<NodeId>('cv-module');
   const [packets, setPackets] = useState<InFlightPacket[]>([]);
-  const [processingNodes, setProcessingNodes] = useState<Record<NodeId, string | null>>({} as Record<NodeId, string | null>);
-  const [nowTick, setNowTick] = useState<number>(() => performance.now());
+  const [processingNodes, setProcessingNodes] = useState<Record<NodeId, string | null>>(
+    {} as Record<NodeId, string | null>
+  );
+
+  // Slow-motion mode (~5% of normal speed so messages can be read calmly in transit)
+  const [isSlowMo, setIsSlowMo] = useState<boolean>(false);
+  const speedFactor = isSlowMo ? 0.05 : 1.0;
+  const speedFactorRef = useRef<number>(speedFactor);
+  speedFactorRef.current = speedFactor;
 
   const [cameraQueueReady, setCameraQueueReady] = useState<number>(3);
   const [logsQueueReady, setLogsQueueReady] = useState<number>(1);
@@ -429,6 +531,7 @@ export const SystemBackendView: React.FC<SystemBackendViewProps> = ({
 
   const packetSeqRef = useRef<number>(1);
   const timersRef = useRef<number[]>([]);
+  const onArriveCallbacksRef = useRef<Record<string, () => void>>({});
 
   const clearScheduledTimers = () => {
     timersRef.current.forEach((id) => window.clearTimeout(id));
@@ -439,39 +542,72 @@ export const SystemBackendView: React.FC<SystemBackendViewProps> = ({
     return () => clearScheduledTimers();
   }, []);
 
-  // Smooth 30fps animation loop for in-flight message packets
+  // Delta-time animation loop so toggling 5% Slow-Mo immediately slows down packets mid-flight
   useEffect(() => {
     let rafId: number;
+    let lastTs = performance.now();
+
     const step = (ts: number) => {
-      setNowTick(ts);
-      setPackets((prev) =>
-        prev.filter((pkt) => ts - pkt.startedAt < pkt.durationMs)
-      );
+      const dt = Math.min(64, Math.max(0, ts - lastTs));
+      lastTs = ts;
+
+      if (!isSimPaused) {
+        const currentSpeed = speedFactorRef.current;
+        const completedIds: string[] = [];
+
+        setPackets((prev) => {
+          if (prev.length === 0) return prev;
+          const next: InFlightPacket[] = [];
+          for (const pkt of prev) {
+            const nextProgress = pkt.progress + (dt * currentSpeed) / pkt.baseDurationMs;
+            if (nextProgress >= 1) {
+              completedIds.push(pkt.id);
+            } else {
+              next.push({ ...pkt, progress: nextProgress });
+            }
+          }
+          return next;
+        });
+
+        if (completedIds.length > 0) {
+          window.setTimeout(() => {
+            completedIds.forEach((id) => {
+              const cb = onArriveCallbacksRef.current[id];
+              if (cb) {
+                delete onArriveCallbacksRef.current[id];
+                cb();
+              }
+            });
+          }, 0);
+        }
+      }
+
       rafId = window.requestAnimationFrame(step);
     };
+
     rafId = window.requestAnimationFrame(step);
     return () => window.cancelAnimationFrame(rafId);
-  }, []);
+  }, [isSimPaused]);
 
-  const pulseNodeProcessing = useCallback((nodeId: NodeId, statusLabel: string, durationMs = 700) => {
+  const pulseNodeProcessing = useCallback((nodeId: NodeId, statusLabel: string, baseDurationMs = 750) => {
+    // Scale node processing indicator duration gently in slow-mo so the user can read it too
+    const scaledDuration = speedFactorRef.current < 0.2 ? baseDurationMs * 4.5 : baseDurationMs;
     setProcessingNodes((prev) => ({ ...prev, [nodeId]: statusLabel }));
     const t = window.setTimeout(() => {
       setProcessingNodes((prev) => ({ ...prev, [nodeId]: null }));
-    }, durationMs);
+    }, scaledDuration);
     timersRef.current.push(t);
   }, []);
 
   const spawnPacket = useCallback(
-    (
-      linkId: string,
-      label: string,
-      durationMs = 820,
-      onArrive?: () => void
-    ) => {
+    (linkId: string, label: string, baseDurationMs = 900, onArrive?: () => void) => {
       const link = DIAGRAM_LINKS.find((l) => l.id === linkId);
       if (!link) return;
       const id = `pkt-${packetSeqRef.current++}`;
-      const startedAt = performance.now();
+
+      if (onArrive) {
+        onArriveCallbacksRef.current[id] = onArrive;
+      }
 
       setPackets((prev) => [
         ...prev.slice(-18),
@@ -482,15 +618,10 @@ export const SystemBackendView: React.FC<SystemBackendViewProps> = ({
           to: link.to,
           label,
           color: link.color,
-          startedAt,
-          durationMs,
+          progress: 0,
+          baseDurationMs,
         },
       ]);
-
-      if (onArrive) {
-        const t = window.setTimeout(onArrive, durationMs);
-        timersRef.current.push(t);
-      }
     },
     []
   );
@@ -515,24 +646,21 @@ export const SystemBackendView: React.FC<SystemBackendViewProps> = ({
     []
   );
 
-  // Flow 1: Camera Frame Ingestion -> S3 + RabbitMQ -> CV Worker -> Results DB -> Logs Queue
+  // Flow 1: Camera Frame Ingestion -> S3 + RabbitMQ -> CV Worker -> Results DB -> Visualization & Logs
   const triggerCameraPipelineFlow = useCallback(() => {
     const cams = ['CAM-MVD-101', 'CAM-MVD-102', 'CAM-MVD-103', 'CAM-MVD-104', 'CAM-MVD-107'];
     const cam = cams[Math.floor(Math.random() * cams.length)];
 
-    // Step 1: Edge processor captures clip
-    pulseNodeProcessing('edge-processor', `CAPTURANDO ${cam}`, 650);
+    pulseNodeProcessing('edge-processor', `CAPTURANDO ${cam}`, 700);
 
-    // Step 1a: Edge uploads MP4 to MinIO S3
-    spawnPacket('edge-processor->clips-db', `PUT ${cam}.mp4`, 750, () => {
-      pulseNodeProcessing('clips-db', 'S3 WRITE OK', 550);
+    spawnPacket('edge-processor->clips-db', `PUT ${cam}.mp4`, 880, () => {
+      pulseNodeProcessing('clips-db', 'S3 WRITE OK', 600);
       setClipsCount((c) => c + 1);
     });
 
-    // Step 1b: Edge publishes metadata event to camera-queue
-    spawnPacket('edge-processor->camera-queue', `ENQUEUE ${cam}`, 820, () => {
+    spawnPacket('edge-processor->camera-queue', `ENQUEUE ${cam}`, 920, () => {
       if (isFaultTolerantDemoMode) {
-        pulseNodeProcessing('camera-queue', 'RETENIENDO MSG', 950);
+        pulseNodeProcessing('camera-queue', 'RETENIENDO MSG', 1000);
         setCameraQueueReady((q) => q + 1);
         appendLog(
           'RABBITMQ',
@@ -543,50 +671,47 @@ export const SystemBackendView: React.FC<SystemBackendViewProps> = ({
         return;
       }
 
-      pulseNodeProcessing('camera-queue', 'ROUTING AMQP', 500);
+      pulseNodeProcessing('camera-queue', 'ROUTING AMQP', 600);
       setCameraQueueReady((q) => Math.max(1, (q % 5) + 1));
 
-      // Step 2: camera-queue dispatches to cv-module worker
-      spawnPacket('camera-queue->cv-module', `FRAME ${cam}`, 820, () => {
-        pulseNodeProcessing('cv-module', `YOLO INFERENCE · ${cam}`, 900);
+      spawnPacket('camera-queue->cv-module', `FRAME ${cam}`, 920, () => {
+        pulseNodeProcessing('cv-module', `YOLO INFERENCE · ${cam}`, 950);
 
-        // Step 3a: cv-module writes vehicle count to results-db
-        const tAfterInference = window.setTimeout(() => {
-          const count = Math.floor(Math.random() * 75) + 28;
-          spawnPacket('cv-module->results-db', `INSERT ${count} VEH`, 740, () => {
-            pulseNodeProcessing('results-db', 'COMMIT SQL', 550);
-            setResultsDbCount((r) => r + 1);
-          });
+        const count = Math.floor(Math.random() * 75) + 28;
+        spawnPacket('cv-module->results-db', `INSERT ${count} VEH`, 860, () => {
+          pulseNodeProcessing('results-db', 'COMMIT SQL', 600);
+          setResultsDbCount((r) => r + 1);
 
-          // Step 3b: cv-module pushes audit log to logs-queue
-          spawnPacket('cv-module->logs-queue', `LOG ACK ${cam}`, 780, () => {
-            pulseNodeProcessing('logs-queue', 'ENQUEUE LOG', 500);
-            appendLog(
-              'CV-MODULE',
-              'ACK',
-              'camera_processing_queue',
-              `Processed ${cam} (${count} veh) -> committed to results-db:5434`
-            );
-            spawnPacket('logs-queue->monitoring-pipeline', 'METRIC BATCH', 700, () => {
-              pulseNodeProcessing('monitoring-pipeline', 'INDEXED', 500);
-            });
+          spawnPacket('results-db->visualization-backend', `SERIES ${cam}`, 820, () => {
+            pulseNodeProcessing('visualization-backend', 'AGGREGATING', 650);
           });
-        }, 420);
-        timersRef.current.push(tAfterInference);
+        });
+
+        spawnPacket('cv-module->logs-queue', `LOG ACK ${cam}`, 880, () => {
+          pulseNodeProcessing('logs-queue', 'ENQUEUE LOG', 550);
+          appendLog(
+            'CV-MODULE',
+            'ACK',
+            'camera_processing_queue',
+            `Processed ${cam} (${count} veh) -> committed to results-db:5434`
+          );
+          spawnPacket('logs-queue->monitoring-pipeline', 'METRIC BATCH', 820, () => {
+            pulseNodeProcessing('monitoring-pipeline', 'INDEXED', 550);
+          });
+        });
       });
     });
   }, [appendLog, isFaultTolerantDemoMode, pulseNodeProcessing, spawnPacket]);
 
   // Flow 2: Login / Auth JWT validation + Joaco's logs_queue push
   const triggerAuthFlow = useCallback(() => {
-    pulseNodeProcessing('frontend', 'POST /login', 500);
+    pulseNodeProcessing('frontend', 'POST /login', 600);
 
-    spawnPacket('frontend->api-rest', 'POST /login', 680, () => {
-      pulseNodeProcessing('api-rest', 'AUTH PROXY', 650);
+    spawnPacket('frontend->api-rest', 'POST /login', 900, () => {
+      pulseNodeProcessing('api-rest', 'AUTH PROXY', 700);
 
-      // Joaco's rabbitMQpush to logs-queue
-      spawnPacket('api-rest->logs-queue', 'LOG: Login req', 760, () => {
-        pulseNodeProcessing('logs-queue', 'MSG QUEUED', 450);
+      spawnPacket('api-rest->logs-queue', 'LOG: Login req', 980, () => {
+        pulseNodeProcessing('logs-queue', 'MSG QUEUED', 550);
         setLogsQueueReady((c) => (c % 3) + 1);
         appendLog(
           'API-REST',
@@ -594,17 +719,16 @@ export const SystemBackendView: React.FC<SystemBackendViewProps> = ({
           'logs_queue',
           'Login request received, sending to auth service'
         );
-        spawnPacket('logs-queue->monitoring-pipeline', 'CONSUME LOG', 680, () => {
-          pulseNodeProcessing('monitoring-pipeline', 'HEARTBEAT OK', 500);
+        spawnPacket('logs-queue->monitoring-pipeline', 'CONSUME LOG', 820, () => {
+          pulseNodeProcessing('monitoring-pipeline', 'HEARTBEAT OK', 550);
         });
       });
 
-      // Forward credentials to auth-service
-      spawnPacket('api-rest->auth-service', 'VERIFY CREDENTIALS', 740, () => {
-        pulseNodeProcessing('auth-service', 'SIGNING JWT', 700);
+      spawnPacket('api-rest->auth-service', 'VERIFY USER', 860, () => {
+        pulseNodeProcessing('auth-service', 'SIGNING JWT', 750);
 
-        spawnPacket('auth-service->auth-db', 'SELECT user', 640, () => {
-          pulseNodeProcessing('auth-db', 'ROW MATCH', 520);
+        spawnPacket('auth-service->auth-db', 'SELECT user', 800, () => {
+          pulseNodeProcessing('auth-db', 'ROW MATCH', 600);
           appendLog(
             'AUTH-SERVICE',
             'ACK',
@@ -616,25 +740,20 @@ export const SystemBackendView: React.FC<SystemBackendViewProps> = ({
     });
   }, [appendLog, pulseNodeProcessing, spawnPacket]);
 
-  // Flow 3: Dashboard Telemetry Query (Frontend -> BFF -> Visualization -> Results DB)
+  // Flow 3: BFF Telemetry response from Visualization Service
   const triggerTelemetryQueryFlow = useCallback(() => {
-    pulseNodeProcessing('frontend', 'GET /intersections', 500);
-    spawnPacket('frontend->api-rest', 'GET /intersections', 660, () => {
-      pulseNodeProcessing('api-rest', 'BFF QUERY', 600);
-      spawnPacket('visualization-backend->api-rest', '8 NODES JSON', 740, () => {
-        pulseNodeProcessing('visualization-backend', 'AGGREGATING', 650);
-      });
-      spawnPacket('results-db->visualization-backend', 'TIME SERIES', 720, () => {
-        pulseNodeProcessing('results-db', 'SELECT SNAPSHOT', 520);
-      });
+    pulseNodeProcessing('visualization-backend', 'SNAPSHOT READY', 600);
+    spawnPacket('visualization-backend->api-rest', '8 NODES JSON', 960, () => {
+      pulseNodeProcessing('api-rest', '200 OK · JSON', 600);
     });
   }, [pulseNodeProcessing, spawnPacket]);
 
-  // Automatic background orchestration so the deployment diagram is always alive
+  // Automatic background orchestration (interval scales with slow-mo so packets don't pile up)
   useEffect(() => {
     if (isSimPaused) return;
     const t0 = window.setTimeout(() => triggerCameraPipelineFlow(), 350);
     let step = 0;
+    const intervalMs = isSlowMo ? 14000 : 2700;
     const interval = window.setInterval(() => {
       step += 1;
       if (step % 3 === 0) {
@@ -645,19 +764,19 @@ export const SystemBackendView: React.FC<SystemBackendViewProps> = ({
         triggerCameraPipelineFlow();
         triggerTelemetryQueryFlow();
       }
-    }, 2600);
+    }, intervalMs);
 
     return () => {
       window.clearTimeout(t0);
       window.clearInterval(interval);
     };
-  }, [isSimPaused, triggerAuthFlow, triggerCameraPipelineFlow, triggerTelemetryQueryFlow]);
+  }, [isSimPaused, isSlowMo, triggerAuthFlow, triggerCameraPipelineFlow, triggerTelemetryQueryFlow]);
 
   const linkGeometries = useMemo(
     () =>
       DIAGRAM_LINKS.map((link) => ({
         link,
-        ...buildLinkPath(link),
+        d: buildPolylineSvgPath(link.points),
       })),
     []
   );
@@ -708,11 +827,24 @@ export const SystemBackendView: React.FC<SystemBackendViewProps> = ({
           <span className="sys-admin-badge">ADMIN ONLY · DEPLOYMENT & MESSAGE FLOW</span>
           <h1 className="sys-title">Diagrama de Componentes y Flujo de Mensajes en Vivo</h1>
           <span className="sys-subtitle">
-            Red <code>distributed_net</code> · 12 nodos · Paquetes AMQP / HTTP / SQL / S3 en tiempo real
+            Topología planar sin cruces · Red <code>distributed_net</code> · Velocidad{' '}
+            <code>{isSlowMo ? '0.05x (5% Lento)' : '1.0x (Normal)'}</code>
           </span>
         </div>
 
         <div className="sys-subheader-right">
+          <button
+            type="button"
+            className={`sim-btn ${isSlowMo ? 'active slowmo-active' : ''}`}
+            onClick={() => setIsSlowMo((s) => !s)}
+            id="btn-slow-mo"
+            aria-pressed={isSlowMo}
+            title="Modo Cámara Lenta (5% de velocidad normal) para inspeccionar y leer cada paquete en tránsito"
+          >
+            <Gauge size={14} strokeWidth={1.75} />
+            <span>{isSlowMo ? 'Modo Lento 5% · ON' : 'Modo Lento (5%)'}</span>
+          </button>
+
           <button
             type="button"
             className="sim-btn primary"
@@ -755,7 +887,7 @@ export const SystemBackendView: React.FC<SystemBackendViewProps> = ({
             id="btn-pause-flow"
           >
             {isSimPaused ? <Play size={13} strokeWidth={1.75} /> : <Pause size={13} strokeWidth={1.75} />}
-            <span>{isSimPaused ? 'Reanudar Flujo' : 'Pausar'}</span>
+            <span>{isSimPaused ? 'Reanudar' : 'Pausar'}</span>
           </button>
         </div>
       </div>
@@ -780,11 +912,16 @@ export const SystemBackendView: React.FC<SystemBackendViewProps> = ({
               <span className="legend-pill">
                 <i style={{ background: '#38BDF8' }} /> MinIO S3 & Telemetría
               </span>
+              {isSlowMo && (
+                <span className="legend-slow-badge">
+                  ● CÁMARA LENTA ACTIVA (5% VELOCIDAD) — LECTURA DETALLADA DE PAQUETES
+                </span>
+              )}
             </div>
 
             <svg
               className="sys-diagram-svg"
-              viewBox="0 0 1260 590"
+              viewBox="0 0 1320 600"
               preserveAspectRatio="xMidYMid meet"
               data-testid="deployment-diagram-svg"
             >
@@ -798,64 +935,75 @@ export const SystemBackendView: React.FC<SystemBackendViewProps> = ({
                   />
                 </pattern>
                 <filter id="pkt-glow" x="-50%" y="-50%" width="200%" height="200%">
-                  <feGaussianBlur stdDeviation="3.2" result="blur" />
+                  <feGaussianBlur stdDeviation="3.5" result="blur" />
                   <feMerge>
                     <feMergeNode in="blur" />
                     <feMergeNode in="SourceGraphic" />
                   </feMerge>
                 </filter>
+                <marker
+                  id="arrow-muted"
+                  viewBox="0 0 10 10"
+                  refX="7"
+                  refY="5"
+                  markerWidth="5"
+                  markerHeight="5"
+                  orient="auto-start-reverse"
+                >
+                  <path d="M 0 1.5 L 8 5 L 0 8.5 z" fill="rgba(255,255,255,0.32)" />
+                </marker>
               </defs>
 
               {/* Subtle engineering grid background */}
-              <rect width="1260" height="590" fill="url(#sys-grid)" />
+              <rect width="1320" height="600" fill="url(#sys-grid)" />
 
               {/* Deployment Tier Swimlanes */}
               <g className="sys-swimlanes">
                 <rect
-                  x="22"
-                  y="24"
-                  width="1216"
+                  x="18"
+                  y="20"
+                  width="1284"
+                  height="136"
+                  rx="8"
+                  fill="rgba(255,255,255,0.01)"
+                  stroke="rgba(255,255,255,0.05)"
+                  strokeDasharray="4 6"
+                />
+                <text x="32" y="38" className="sys-lane-label">
+                  PLANO 01 · SEGURIDAD (AUTH-DB / AUTH-SERVICE), GATEWAY BFF & CLIENTE WEB
+                </text>
+
+                <rect
+                  x="18"
+                  y="222"
+                  width="1284"
+                  height="146"
+                  rx="8"
+                  fill="rgba(255,255,255,0.012)"
+                  stroke="rgba(255,255,255,0.05)"
+                  strokeDasharray="4 6"
+                />
+                <text x="32" y="240" className="sys-lane-label">
+                  PLANO 02 · PIPELINE LINEAL DE VISIÓN ARTIFICIAL (EDGE → RABBITMQ #1 → CV WORKERS → RESULTS-DB → VISUALIZATION)
+                </text>
+
+                <rect
+                  x="18"
+                  y="426"
+                  width="1284"
                   height="146"
                   rx="8"
                   fill="rgba(255,255,255,0.01)"
                   stroke="rgba(255,255,255,0.05)"
                   strokeDasharray="4 6"
                 />
-                <text x="36" y="42" className="sys-lane-label">
-                  PLANO DE ACCESO, BFF GATEWAY & AUTENTICACIÓN JWT
-                </text>
-
-                <rect
-                  x="22"
-                  y="214"
-                  width="1216"
-                  height="160"
-                  rx="8"
-                  fill="rgba(255,255,255,0.012)"
-                  stroke="rgba(255,255,255,0.05)"
-                  strokeDasharray="4 6"
-                />
-                <text x="36" y="232" className="sys-lane-label">
-                  PLANO DE PROCESAMIENTO ASÍNCRONO DE VIDEO (EDGE → RABBITMQ → CV WORKERS → POSTGRESQL)
-                </text>
-
-                <rect
-                  x="22"
-                  y="414"
-                  width="1216"
-                  height="152"
-                  rx="8"
-                  fill="rgba(255,255,255,0.01)"
-                  stroke="rgba(255,255,255,0.05)"
-                  strokeDasharray="4 6"
-                />
-                <text x="36" y="432" className="sys-lane-label">
-                  PLANO DE OBJECT STORAGE (MINIO S3), ANALÍTICA Y OBSERVABILIDAD DISTRIBUIDA
+                <text x="32" y="444" className="sys-lane-label">
+                  PLANO 03 · ALMACENAMIENTO S3 (MINIO) & OBSERVABILIDAD DISTRIBUIDA (RABBITMQ #2 → MONITORING PIPELINE)
                 </text>
               </g>
 
-              {/* Directed Connector Paths + Protocol Badges */}
-              {linkGeometries.map(({ link, d, p0, p1, p2 }) => {
+              {/* Directed Planar Connector Paths + Offset Protocol Labels */}
+              {linkGeometries.map(({ link, d }) => {
                 const isBlockedCvLink =
                   isFaultTolerantDemoMode &&
                   (link.id === 'camera-queue->cv-module' ||
@@ -865,48 +1013,88 @@ export const SystemBackendView: React.FC<SystemBackendViewProps> = ({
                 const isHighlighted =
                   link.from === selectedNodeId || link.to === selectedNodeId;
 
-                const [labelX, labelY] = pointOnQuadBezier(p0, p1, p2, 0.5);
+                const [lx, ly] = link.labelPos;
+                const startPt = link.points[0];
+                const endPt = link.points[link.points.length - 1];
 
                 return (
-                  <g key={link.id} className="sys-link-group">
-                    {/* Base subtle halo when selected */}
+                  <g
+                    key={link.id}
+                    className={`sys-link-group ${isHighlighted ? 'is-highlighted' : ''}`}
+                    data-testid={`diagram-link-${link.id}`}
+                  >
+                    {/* Outer glowing aura when a connected node is selected */}
                     {isHighlighted && (
                       <path
                         d={d}
                         fill="none"
-                        stroke={link.color}
-                        strokeWidth="5"
-                        strokeOpacity="0.16"
+                        stroke={isBlockedCvLink ? '#EF4444' : link.color}
+                        strokeWidth="8"
+                        strokeOpacity="0.24"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
                       />
                     )}
 
-                    {/* Main wire */}
+                    {/* Main continuous unobstructed wire */}
                     <path
                       d={d}
                       fill="none"
-                      stroke={isBlockedCvLink ? '#EF4444' : isHighlighted ? link.color : 'rgba(255,255,255,0.16)'}
-                      strokeWidth={isHighlighted ? 2 : 1.4}
+                      stroke={
+                        isBlockedCvLink
+                          ? '#EF4444'
+                          : isHighlighted
+                          ? link.color
+                          : 'rgba(255,255,255,0.22)'
+                      }
+                      strokeWidth={isHighlighted ? 2.8 : 1.5}
                       strokeDasharray={isBlockedCvLink ? '4 6' : undefined}
-                      strokeOpacity={isBlockedCvLink ? 0.5 : 0.9}
+                      strokeLinejoin="round"
+                      strokeLinecap="round"
+                      markerEnd="url(#arrow-muted)"
                     />
 
-                    {/* Protocol label pill on wire */}
-                    <g transform={`translate(${labelX}, ${labelY})`}>
-                      <rect
-                        x="-48"
-                        y="-9"
-                        width="96"
-                        height="18"
-                        rx="4"
-                        fill="#09090B"
-                        stroke={isBlockedCvLink ? 'rgba(239,68,68,0.45)' : 'rgba(255,255,255,0.1)'}
+                    {/* Animated marching ants overlay on highlighted wires */}
+                    {isHighlighted && !isBlockedCvLink && (
+                      <path
+                        d={d}
+                        fill="none"
+                        stroke="#FAFAFA"
+                        strokeWidth="1.5"
+                        strokeDasharray="3 9"
+                        strokeOpacity="0.85"
+                        className="sys-wire-highlight-flow"
                       />
+                    )}
+
+                    {/* Port connection terminals at both ends of the wire */}
+                    <circle
+                      cx={startPt[0]}
+                      cy={startPt[1]}
+                      r={isHighlighted ? 3.5 : 2.2}
+                      fill={isHighlighted ? link.color : 'rgba(255,255,255,0.35)'}
+                    />
+                    <circle
+                      cx={endPt[0]}
+                      cy={endPt[1]}
+                      r={isHighlighted ? 3.5 : 2.2}
+                      fill={isHighlighted ? link.color : 'rgba(255,255,255,0.35)'}
+                    />
+
+                    {/* Offset translucent protocol label (positioned alongside the wire so the wire stays 100% visible) */}
+                    <g transform={`translate(${lx}, ${ly})`}>
                       <text
                         x="0"
-                        y="3.5"
+                        y="0"
                         textAnchor="middle"
                         className="sys-wire-label"
-                        fill={isBlockedCvLink ? '#EF4444' : '#A1A1AA'}
+                        fill={
+                          isBlockedCvLink
+                            ? '#EF4444'
+                            : isHighlighted
+                            ? '#FAFAFA'
+                            : 'rgba(161, 161, 170, 0.78)'
+                        }
                       >
                         {isBlockedCvLink ? 'PAUSED' : link.protocol}
                       </text>
@@ -923,10 +1111,8 @@ export const SystemBackendView: React.FC<SystemBackendViewProps> = ({
                 const activeProcessLabel = processingNodes[node.id];
                 const isProcessing = Boolean(activeProcessLabel) && !isCvDegraded;
 
-                const width = 212;
-                const height = 88;
-                const x = node.cx - width / 2;
-                const y = node.cy - height / 2;
+                const x = node.cx - CARD_W / 2;
+                const y = node.cy - CARD_H / 2;
 
                 const borderColor = isCvDegraded
                   ? '#EF4444'
@@ -936,7 +1122,7 @@ export const SystemBackendView: React.FC<SystemBackendViewProps> = ({
                   ? '#3B82F6'
                   : isProcessing
                   ? '#10B981'
-                  : 'rgba(255,255,255,0.13)';
+                  : 'rgba(255,255,255,0.14)';
 
                 const statusColor = isCvDegraded
                   ? '#EF4444'
@@ -955,25 +1141,25 @@ export const SystemBackendView: React.FC<SystemBackendViewProps> = ({
                     data-testid={`diagram-node-${node.id}`}
                     style={{ cursor: 'pointer' }}
                   >
-                    {/* Outer active processing halo */}
+                    {/* Outer active processing / selection halo */}
                     {(isProcessing || isSelected) && (
                       <rect
                         x="-3"
                         y="-3"
-                        width={width + 6}
-                        height={height + 6}
+                        width={CARD_W + 6}
+                        height={CARD_H + 6}
                         rx="9"
                         fill="none"
                         stroke={isSelected ? '#3B82F6' : '#10B981'}
-                        strokeOpacity={isProcessing ? '0.45' : '0.3'}
+                        strokeOpacity={isProcessing ? '0.45' : '0.35'}
                         strokeWidth="2"
                       />
                     )}
 
                     {/* Node Card Body */}
                     <rect
-                      width={width}
-                      height={height}
+                      width={CARD_W}
+                      height={CARD_H}
                       rx="7"
                       fill="#111114"
                       stroke={borderColor}
@@ -984,18 +1170,18 @@ export const SystemBackendView: React.FC<SystemBackendViewProps> = ({
                     <rect
                       x="1"
                       y="1"
-                      width={width - 2}
-                      height="24"
+                      width={CARD_W - 2}
+                      height="23"
                       rx="6"
                       fill="rgba(255,255,255,0.03)"
                     />
 
                     {/* Status Dot + Container Name + Port */}
-                    <circle cx="14" cy="13" r="3.8" fill={statusColor} />
+                    <circle cx="13" cy="12.5" r="3.6" fill={statusColor} />
                     {isProcessing && (
                       <circle
-                        cx="14"
-                        cy="13"
+                        cx="13"
+                        cy="12.5"
                         r="7"
                         fill="none"
                         stroke="#10B981"
@@ -1003,27 +1189,27 @@ export const SystemBackendView: React.FC<SystemBackendViewProps> = ({
                         className="sys-node-pulse-ring"
                       />
                     )}
-                    <text x="24" y="16.5" className="sys-node-container">
+                    <text x="23" y="16" className="sys-node-container">
                       {node.container}
                     </text>
-                    <text x={width - 10} y="16.5" textAnchor="end" className="sys-node-port">
+                    <text x={CARD_W - 10} y="16" textAnchor="end" className="sys-node-port">
                       {node.port}
                     </text>
 
                     {/* Title & Stack */}
-                    <text x="12" y="44" className="sys-node-title">
+                    <text x="11" y="42" className="sys-node-title">
                       {node.title}
                     </text>
-                    <text x="12" y="59" className="sys-node-tech">
+                    <text x="11" y="56" className="sys-node-tech">
                       {node.tech}
                     </text>
 
                     {/* Bottom Telemetry / Processing Pill */}
                     <rect
-                      x="10"
-                      y="66"
-                      width={width - 20}
-                      height="16"
+                      x="9"
+                      y="63"
+                      width={CARD_W - 18}
+                      height="15"
                       rx="3"
                       fill={
                         isCvDegraded
@@ -1034,8 +1220,8 @@ export const SystemBackendView: React.FC<SystemBackendViewProps> = ({
                       }
                     />
                     <text
-                      x="16"
-                      y="77"
+                      x="15"
+                      y="73.5"
                       className="sys-node-metric"
                       fill={
                         isCvDegraded
@@ -1053,17 +1239,11 @@ export const SystemBackendView: React.FC<SystemBackendViewProps> = ({
                 );
               })}
 
-              {/* Animated In-Flight Message Packets (rendered on top of nodes & wires) */}
+              {/* Animated In-Flight Message Packets (traveling along exact border-to-border polylines) */}
               {packets.map((pkt) => {
-                const geom = linkGeometries.find((g) => g.link.id === pkt.linkId);
-                if (!geom) return null;
-                const progress = Math.min(
-                  1,
-                  Math.max(0, (nowTick - pkt.startedAt) / pkt.durationMs)
-                );
-                // Travel along the visible wire segment between card edges (t = 0.24 -> 0.76)
-                const wireT = 0.24 + progress * 0.52;
-                const [x, y] = pointOnQuadBezier(geom.p0, geom.p1, geom.p2, wireT);
+                const link = DIAGRAM_LINKS.find((l) => l.id === pkt.linkId);
+                if (!link) return null;
+                const [x, y] = pointAlongPolyline(link.points, pkt.progress);
 
                 return (
                   <g
@@ -1072,29 +1252,20 @@ export const SystemBackendView: React.FC<SystemBackendViewProps> = ({
                     className="sys-packet"
                     style={{ pointerEvents: 'none' }}
                   >
-                    <circle
-                      r="5.5"
-                      fill={pkt.color}
-                      filter="url(#pkt-glow)"
-                    />
+                    <circle r="5.5" fill={pkt.color} filter="url(#pkt-glow)" />
                     <circle r="2.2" fill="#FAFAFA" />
-                    <g transform="translate(0, -14)">
+                    <g transform="translate(0, 16)">
                       <rect
-                        x="-48"
-                        y="-10"
-                        width="96"
+                        x="-52"
+                        y="-9"
+                        width="104"
                         height="16"
                         rx="3"
-                        fill="rgba(9, 9, 11, 0.95)"
+                        fill="rgba(9, 9, 11, 0.94)"
                         stroke={pkt.color}
                         strokeWidth="1"
                       />
-                      <text
-                        x="0"
-                        y="1"
-                        textAnchor="middle"
-                        className="sys-packet-label"
-                      >
+                      <text x="0" y="2" textAnchor="middle" className="sys-packet-label">
                         {pkt.label}
                       </text>
                     </g>
