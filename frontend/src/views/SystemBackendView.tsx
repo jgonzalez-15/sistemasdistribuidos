@@ -1,17 +1,12 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  ArrowRight,
-  Cpu,
-  Database,
-  HardDrive,
-  Layers,
   Pause,
   Play,
-  RefreshCw,
-  Server,
+  Send,
   ShieldAlert,
   Terminal,
   Trash2,
+  Zap,
 } from 'lucide-react';
 import {
   API_REST_URL,
@@ -27,51 +22,57 @@ interface SystemBackendViewProps {
   onToggleFaultTolerance: () => void;
 }
 
-type NodeStatus = 'online' | 'standby' | 'degraded';
+type NodeId =
+  | 'frontend'
+  | 'api-rest'
+  | 'auth-service'
+  | 'auth-db'
+  | 'visualization-backend'
+  | 'edge-processor'
+  | 'clips-db'
+  | 'camera-queue'
+  | 'cv-module'
+  | 'results-db'
+  | 'logs-queue'
+  | 'monitoring-pipeline';
+
+type NodeKind = 'client' | 'service' | 'broker' | 'database' | 'object-store';
 type LogSource = 'ALL' | 'API-REST' | 'AUTH-SERVICE' | 'EDGE-PROC' | 'CV-MODULE' | 'RABBITMQ' | 'MONITORING';
 
-interface MicroserviceNode {
-  id: string;
-  name: string;
+interface DiagramNodeSpec {
+  id: NodeId;
+  title: string;
   container: string;
-  port: number;
-  url: string;
+  port: string;
+  kind: NodeKind;
+  zone: string;
+  tech: string;
   role: string;
-  stack: string;
-  status: NodeStatus;
-  livePing: boolean;
-  latencyMs: number;
-  replicas: number;
-  rps: number;
+  url?: string;
+  /** SVG center coordinates on a 1260 x 590 canvas */
+  cx: number;
+  cy: number;
 }
 
-interface QueueMetrics {
+interface DiagramLinkSpec {
   id: string;
-  name: string;
-  container: string;
-  amqpPort: number;
-  mgmtPort: number;
-  readyMessages: number;
-  unackedMessages: number;
-  publishRate: number;
-  consumeRate: number;
-  consumers: number;
-  status: 'flowing' | 'retaining';
+  from: NodeId;
+  to: NodeId;
+  protocol: string;
+  color: string;
+  /** Optional control point offset for curved SVG Bezier path */
+  curveOffset?: [number, number];
 }
 
-interface StorageMetrics {
+interface InFlightPacket {
   id: string;
-  name: string;
-  container: string;
-  engine: string;
-  port: number;
-  consolePort?: number;
-  databaseOrBucket: string;
-  recordsCount: number;
-  recordsUnit: string;
-  storageSizeMb: number;
-  iops: number;
-  status: 'online' | 'degraded';
+  linkId: string;
+  from: NodeId;
+  to: NodeId;
+  label: string;
+  color: string;
+  startedAt: number;
+  durationMs: number;
 }
 
 interface DistributedLogEntry {
@@ -83,6 +84,288 @@ interface DistributedLogEntry {
   message: string;
 }
 
+const DIAGRAM_NODES: DiagramNodeSpec[] = [
+  // Row 1: Client / BFF / Auth Plane
+  {
+    id: 'frontend',
+    title: 'React SPA Console',
+    container: 'frontend',
+    port: ':3000',
+    kind: 'client',
+    zone: 'CLIENT TIER',
+    tech: 'React 18 · Vite · Leaflet',
+    role: 'Consola web de supervisión urbana y telemetría',
+    cx: 130,
+    cy: 96,
+  },
+  {
+    id: 'api-rest',
+    title: 'API REST (BFF)',
+    container: 'api-rest',
+    port: ':8000',
+    kind: 'service',
+    zone: 'GATEWAY / BFF',
+    tech: 'FastAPI · Pika · Requests',
+    role: 'POST /login · GET /api/intersections · Publicador logs_queue',
+    url: API_REST_URL,
+    cx: 410,
+    cy: 96,
+  },
+  {
+    id: 'auth-service',
+    title: 'Auth Service',
+    container: 'auth-service',
+    port: ':8005',
+    kind: 'service',
+    zone: 'SECURITY TIER',
+    tech: 'FastAPI · JWT HS256',
+    role: 'Validación de credenciales de Operador/Admin y firma JWT',
+    url: AUTH_SERVICE_URL,
+    cx: 790,
+    cy: 96,
+  },
+  {
+    id: 'auth-db',
+    title: 'Auth Database',
+    container: 'auth-db',
+    port: ':5433',
+    kind: 'database',
+    zone: 'PERSISTENCE',
+    tech: 'PostgreSQL 16 (auth_db)',
+    role: 'Tabla users · Credenciales y roles del sistema',
+    cx: 1110,
+    cy: 96,
+  },
+
+  // Row 2: Edge Ingestion -> RabbitMQ -> CV Workers -> PostgreSQL Results
+  {
+    id: 'edge-processor',
+    title: 'Edge Processor',
+    container: 'edge-processor',
+    port: ':8001',
+    kind: 'service',
+    zone: 'EDGE INGESTION',
+    tech: 'FastAPI · Boto3 · Pika',
+    role: 'Captura clips de cámaras de Montevideo, sube a S3 y encola evento',
+    url: EDGE_PROCESSOR_URL,
+    cx: 130,
+    cy: 295,
+  },
+  {
+    id: 'camera-queue',
+    title: 'Camera Queue',
+    container: 'camera-queue',
+    port: ':5672',
+    kind: 'broker',
+    zone: 'MESSAGE BROKER #1',
+    tech: 'RabbitMQ 3.13 (AMQP)',
+    role: 'Cola durable camera_processing_queue · Desacopla ingesta y CV',
+    cx: 410,
+    cy: 295,
+  },
+  {
+    id: 'cv-module',
+    title: 'CV Module Workers',
+    container: 'cv-module',
+    port: ':8002',
+    kind: 'service',
+    zone: 'CV WORKER POOL (x3)',
+    tech: 'FastAPI · YOLO/OpenCV',
+    role: 'Consume camera_processing_queue, descarga clip S3 y cuenta vehículos',
+    url: CV_MODULE_URL,
+    cx: 790,
+    cy: 295,
+  },
+  {
+    id: 'results-db',
+    title: 'Results Database',
+    container: 'results-db',
+    port: ':5434',
+    kind: 'database',
+    zone: 'PERSISTENCE',
+    tech: 'PostgreSQL 16 (results_db)',
+    role: 'Estado consolidado por intersección y serie temporal histórica',
+    cx: 1110,
+    cy: 295,
+  },
+
+  // Row 3: Object Storage / Visualization / Logs Broker / Monitoring Pipeline
+  {
+    id: 'clips-db',
+    title: 'Clips Object Store',
+    container: 'clips-db',
+    port: ':9000',
+    kind: 'object-store',
+    zone: 'OBJECT STORAGE',
+    tech: 'MinIO S3 (s3://clips)',
+    role: 'Almacenamiento de fragmentos de video MP4 crudos',
+    cx: 130,
+    cy: 494,
+  },
+  {
+    id: 'visualization-backend',
+    title: 'Visualization Service',
+    container: 'visualization-backend',
+    port: ':8003',
+    kind: 'service',
+    zone: 'ANALYTICS TIER',
+    tech: 'FastAPI · Psycopg2',
+    role: 'Cálculo de saturación, velocidad media y detección de patrón',
+    url: VISUALIZATION_BACKEND_URL,
+    cx: 410,
+    cy: 494,
+  },
+  {
+    id: 'logs-queue',
+    title: 'Logs Queue',
+    container: 'logs-queue',
+    port: ':5673',
+    kind: 'broker',
+    zone: 'MESSAGE BROKER #2',
+    tech: 'RabbitMQ 3.13 (AMQP)',
+    role: 'Cola durable logs_queue · Centraliza telemetría y auditoría',
+    cx: 790,
+    cy: 494,
+  },
+  {
+    id: 'monitoring-pipeline',
+    title: 'Monitoring Pipeline',
+    container: 'monitoring-pipeline',
+    port: ':8004',
+    kind: 'service',
+    zone: 'OBSERVABILITY',
+    tech: 'FastAPI · Pika · Httpx',
+    role: 'Consumidor de logs_queue y chequeo de salud de contenedores',
+    url: MONITORING_PIPELINE_URL,
+    cx: 1110,
+    cy: 494,
+  },
+];
+
+const DIAGRAM_LINKS: DiagramLinkSpec[] = [
+  {
+    id: 'frontend->api-rest',
+    from: 'frontend',
+    to: 'api-rest',
+    protocol: 'HTTP / JSON',
+    color: '#3B82F6',
+  },
+  {
+    id: 'api-rest->auth-service',
+    from: 'api-rest',
+    to: 'auth-service',
+    protocol: 'POST /login',
+    color: '#A855F7',
+  },
+  {
+    id: 'auth-service->auth-db',
+    from: 'auth-service',
+    to: 'auth-db',
+    protocol: 'SQL :5432',
+    color: '#A855F7',
+  },
+  {
+    id: 'edge-processor->clips-db',
+    from: 'edge-processor',
+    to: 'clips-db',
+    protocol: 'S3 PUT MP4',
+    color: '#38BDF8',
+  },
+  {
+    id: 'edge-processor->camera-queue',
+    from: 'edge-processor',
+    to: 'camera-queue',
+    protocol: 'AMQP PUB :5672',
+    color: '#F59E0B',
+  },
+  {
+    id: 'camera-queue->cv-module',
+    from: 'camera-queue',
+    to: 'cv-module',
+    protocol: 'AMQP CONSUME',
+    color: '#10B981',
+  },
+  {
+    id: 'cv-module->results-db',
+    from: 'cv-module',
+    to: 'results-db',
+    protocol: 'SQL INSERT',
+    color: '#10B981',
+  },
+  {
+    id: 'results-db->visualization-backend',
+    from: 'results-db',
+    to: 'visualization-backend',
+    protocol: 'SQL SELECT',
+    color: '#3B82F6',
+    curveOffset: [0, 55],
+  },
+  {
+    id: 'visualization-backend->api-rest',
+    from: 'visualization-backend',
+    to: 'api-rest',
+    protocol: 'HTTP :8003',
+    color: '#3B82F6',
+    curveOffset: [-48, 0],
+  },
+  {
+    id: 'api-rest->logs-queue',
+    from: 'api-rest',
+    to: 'logs-queue',
+    protocol: 'AMQP LOG',
+    color: '#F59E0B',
+    curveOffset: [20, 40],
+  },
+  {
+    id: 'cv-module->logs-queue',
+    from: 'cv-module',
+    to: 'logs-queue',
+    protocol: 'AMQP LOG',
+    color: '#F59E0B',
+  },
+  {
+    id: 'logs-queue->monitoring-pipeline',
+    from: 'logs-queue',
+    to: 'monitoring-pipeline',
+    protocol: 'AMQP CONSUME :5673',
+    color: '#38BDF8',
+  },
+];
+
+const NODE_MAP: Record<NodeId, DiagramNodeSpec> = DIAGRAM_NODES.reduce((acc, n) => {
+  acc[n.id] = n;
+  return acc;
+}, {} as Record<NodeId, DiagramNodeSpec>);
+
+function buildLinkPath(link: DiagramLinkSpec): {
+  d: string;
+  p0: [number, number];
+  p1: [number, number];
+  p2: [number, number];
+} {
+  const src = NODE_MAP[link.from];
+  const dst = NODE_MAP[link.to];
+  const p0: [number, number] = [src.cx, src.cy];
+  const p2: [number, number] = [dst.cx, dst.cy];
+  const midX = (p0[0] + p2[0]) / 2 + (link.curveOffset?.[0] ?? 0);
+  const midY = (p0[1] + p2[1]) / 2 + (link.curveOffset?.[1] ?? 0);
+  const p1: [number, number] = [midX, midY];
+  const d = `M ${p0[0]} ${p0[1]} Q ${p1[0]} ${p1[1]} ${p2[0]} ${p2[1]}`;
+  return { d, p0, p1, p2 };
+}
+
+function pointOnQuadBezier(
+  p0: [number, number],
+  p1: [number, number],
+  p2: [number, number],
+  t: number
+): [number, number] {
+  const u = 1 - t;
+  const x = u * u * p0[0] + 2 * u * t * p1[0] + t * t * p2[0];
+  const y = u * u * p0[1] + 2 * u * t * p1[1] + t * t * p2[1];
+  return [x, y];
+}
+
 function formatJoacoTimestamp(d: Date): string {
   const pad = (n: number) => String(n).padStart(2, '0');
   return `${pad(d.getDate())}-${pad(d.getMonth() + 1)}-${d.getFullYear()} ${pad(d.getHours())}:${pad(
@@ -90,196 +373,27 @@ function formatJoacoTimestamp(d: Date): string {
   )}:${pad(d.getSeconds())}`;
 }
 
-const INITIAL_SERVICES: Omit<MicroserviceNode, 'status' | 'livePing' | 'latencyMs'>[] = [
-  {
-    id: 'api-rest',
-    name: 'API REST (BFF)',
-    container: 'api-rest',
-    port: 8000,
-    url: API_REST_URL,
-    role: 'Gateway HTTP · Auth & Telemetría',
-    stack: 'FastAPI · Pika · Requests',
-    replicas: 1,
-    rps: 24,
-  },
-  {
-    id: 'edge-processor',
-    name: 'Edge Processor',
-    container: 'edge-processor',
-    port: 8001,
-    url: EDGE_PROCESSOR_URL,
-    role: 'Captura de Cámaras · Subida S3',
-    stack: 'FastAPI · Boto3 · Pika',
-    replicas: 2,
-    rps: 8,
-  },
-  {
-    id: 'cv-module',
-    name: 'CV Module Workers',
-    container: 'cv-module',
-    port: 8002,
-    url: CV_MODULE_URL,
-    role: 'Detección Vehicular · Consumidor AMQP',
-    stack: 'FastAPI · OpenCV/YOLO · Psycopg2',
-    replicas: 3,
-    rps: 16,
-  },
-  {
-    id: 'visualization-backend',
-    name: 'Visualization Backend',
-    container: 'visualization-backend',
-    port: 8003,
-    url: VISUALIZATION_BACKEND_URL,
-    role: 'Series Temporales & Agregación',
-    stack: 'FastAPI · Psycopg2 · Boto3',
-    replicas: 1,
-    rps: 12,
-  },
-  {
-    id: 'monitoring-pipeline',
-    name: 'Monitoring Pipeline',
-    container: 'monitoring-pipeline',
-    port: 8004,
-    url: MONITORING_PIPELINE_URL,
-    role: 'Consumidor logs_queue · Health',
-    stack: 'FastAPI · Pika · Httpx',
-    replicas: 1,
-    rps: 19,
-  },
-  {
-    id: 'auth-service',
-    name: 'Auth Service',
-    container: 'auth-service',
-    port: 8005,
-    url: AUTH_SERVICE_URL,
-    role: 'Validación Credenciales & JWT',
-    stack: 'FastAPI · Psycopg2 · Pika',
-    replicas: 1,
-    rps: 5,
-  },
-];
-
-async function probeHealth(url: string): Promise<{ ok: boolean; latencyMs: number }> {
-  const t0 = performance.now();
-  const controller = new AbortController();
-  const timer = window.setTimeout(() => controller.abort(), 1100);
-  try {
-    const res = await fetch(`${url}/health`, {
-      method: 'GET',
-      signal: controller.signal,
-    });
-    window.clearTimeout(timer);
-    const elapsed = Math.max(2, Math.round(performance.now() - t0));
-    if (res.ok) {
-      return { ok: true, latencyMs: elapsed };
-    }
-  } catch {
-    // Try no-cors reachability check if CORS isn't enabled on a skeleton container yet
-    try {
-      const c2 = new AbortController();
-      const t2 = window.setTimeout(() => c2.abort(), 800);
-      await fetch(`${url}/health`, { mode: 'no-cors', signal: c2.signal });
-      window.clearTimeout(t2);
-      const elapsed = Math.max(3, Math.round(performance.now() - t0));
-      return { ok: true, latencyMs: elapsed };
-    } catch {
-      window.clearTimeout(timer);
-    }
-  }
-  return { ok: false, latencyMs: Math.floor(Math.random() * 9) + 6 };
-}
-
 export const SystemBackendView: React.FC<SystemBackendViewProps> = ({
   isFaultTolerantDemoMode,
   onToggleFaultTolerance,
 }) => {
-  const [services, setServices] = useState<MicroserviceNode[]>(() =>
-    INITIAL_SERVICES.map((s) => ({
-      ...s,
-      status: 'online',
-      livePing: s.id === 'api-rest',
-      latencyMs: 8,
-    }))
-  );
+  const [selectedNodeId, setSelectedNodeId] = useState<NodeId>('camera-queue');
+  const [packets, setPackets] = useState<InFlightPacket[]>([]);
+  const [processingNodes, setProcessingNodes] = useState<Record<NodeId, string | null>>({} as Record<NodeId, string | null>);
+  const [nowTick, setNowTick] = useState<number>(() => performance.now());
 
-  const [queues, setQueues] = useState<QueueMetrics[]>([
-    {
-      id: 'camera-queue',
-      name: 'camera_processing_queue',
-      container: 'camera-queue (RabbitMQ #1)',
-      amqpPort: 5672,
-      mgmtPort: 15672,
-      readyMessages: 4,
-      unackedMessages: 2,
-      publishRate: 8.4,
-      consumeRate: 8.2,
-      consumers: 3,
-      status: 'flowing',
-    },
-    {
-      id: 'logs-queue',
-      name: 'logs_queue',
-      container: 'logs-queue (RabbitMQ #2)',
-      amqpPort: 5673,
-      mgmtPort: 15673,
-      readyMessages: 1,
-      unackedMessages: 1,
-      publishRate: 14.6,
-      consumeRate: 14.5,
-      consumers: 1,
-      status: 'flowing',
-    },
-  ]);
-
-  const [storages, setStorages] = useState<StorageMetrics[]>([
-    {
-      id: 'auth-db',
-      name: 'Auth Database',
-      container: 'auth-db',
-      engine: 'PostgreSQL 16',
-      port: 5433,
-      databaseOrBucket: 'auth_db · table: users',
-      recordsCount: 12,
-      recordsUnit: 'USUARIOS',
-      storageSizeMb: 42,
-      iops: 14,
-      status: 'online',
-    },
-    {
-      id: 'results-db',
-      name: 'Results Database',
-      container: 'results-db',
-      engine: 'PostgreSQL 16',
-      port: 5434,
-      databaseOrBucket: 'results_db · telemetría vial',
-      recordsCount: 18420,
-      recordsUnit: 'REGISTROS',
-      storageSizeMb: 318,
-      iops: 68,
-      status: 'online',
-    },
-    {
-      id: 'clips-db',
-      name: 'Clips Object Storage',
-      container: 'clips-db',
-      engine: 'MinIO S3',
-      port: 9000,
-      consolePort: 9001,
-      databaseOrBucket: 's3://clips (video batches)',
-      recordsCount: 1284,
-      recordsUnit: 'CLIPS MP4',
-      storageSizeMb: 4860,
-      iops: 31,
-      status: 'online',
-    },
-  ]);
+  const [cameraQueueReady, setCameraQueueReady] = useState<number>(3);
+  const [logsQueueReady, setLogsQueueReady] = useState<number>(1);
+  const [resultsDbCount, setResultsDbCount] = useState<number>(18420);
+  const [clipsCount, setClipsCount] = useState<number>(1284);
+  const [isSimPaused, setIsSimPaused] = useState<boolean>(false);
 
   const [logs, setLogs] = useState<DistributedLogEntry[]>(() => {
     const now = Date.now();
     return [
       {
         id: 'init-1',
-        timestamp: formatJoacoTimestamp(new Date(now - 7000)),
+        timestamp: formatJoacoTimestamp(new Date(now - 5200)),
         service: 'API-REST',
         level: 'INFO',
         queue: 'logs_queue',
@@ -287,638 +401,794 @@ export const SystemBackendView: React.FC<SystemBackendViewProps> = ({
       },
       {
         id: 'init-2',
-        timestamp: formatJoacoTimestamp(new Date(now - 6400)),
+        timestamp: formatJoacoTimestamp(new Date(now - 4500)),
         service: 'AUTH-SERVICE',
         level: 'ACK',
         queue: 'logs_queue',
-        message: 'Credentials validated against auth-db:5432 (user="admin.central", role="Administrador")',
+        message: 'Validated user="admin.central" against auth-db:5433 · Issued JWT HS256',
       },
       {
         id: 'init-3',
-        timestamp: formatJoacoTimestamp(new Date(now - 5900)),
-        service: 'API-REST',
-        level: 'INFO',
-        queue: 'logs_queue',
-        message: 'Login response received from auth service, sending to frontend',
-      },
-      {
-        id: 'init-4',
-        timestamp: formatJoacoTimestamp(new Date(now - 4200)),
+        timestamp: formatJoacoTimestamp(new Date(now - 3100)),
         service: 'EDGE-PROC',
         level: 'INFO',
         queue: 'camera_processing_queue',
-        message: 'Clip uploaded to MinIO s3://clips/CAM-MVD-101_batch842.mp4 · Enqueued task in camera_processing_queue',
+        message: 'Uploaded s3://clips/CAM-MVD-101.mp4 -> Published frame task to camera_processing_queue',
       },
       {
-        id: 'init-5',
-        timestamp: formatJoacoTimestamp(new Date(now - 2800)),
+        id: 'init-4',
+        timestamp: formatJoacoTimestamp(new Date(now - 1800)),
         service: 'CV-MODULE',
         level: 'ACK',
         queue: 'camera_processing_queue',
-        message: 'Worker cv-worker-01 processed CAM-MVD-101 (98 veh, 12 km/h) -> committed to results-db:5434',
-      },
-      {
-        id: 'init-6',
-        timestamp: formatJoacoTimestamp(new Date(now - 1200)),
-        service: 'MONITORING',
-        level: 'INFO',
-        queue: 'logs_queue',
-        message: 'Consumed 5 log frames from logs-queue:5672 · Cluster heartbeat OK',
+        message: 'Worker cv-worker-02 ACK CAM-MVD-101 (98 veh · 12 km/h) -> INSERT INTO results-db:5434',
       },
     ];
   });
-
   const [logFilter, setLogFilter] = useState<LogSource>('ALL');
-  const [isLogStreamPaused, setIsLogStreamPaused] = useState<boolean>(false);
-  const [lastProbeTime, setLastProbeTime] = useState<string>(() => new Date().toLocaleTimeString());
-  const [isProbing, setIsProbing] = useState<boolean>(false);
-  const logCounterRef = useRef<number>(100);
 
-  const runHealthProbes = useCallback(async () => {
-    setIsProbing(true);
-    const results = await Promise.all(
-      INITIAL_SERVICES.map(async (svc) => {
-        const probe = await probeHealth(svc.url);
-        const isCvDegraded = isFaultTolerantDemoMode && svc.id === 'cv-module';
-        const status: NodeStatus = isCvDegraded
-          ? 'degraded'
-          : probe.ok
-          ? 'online'
-          : 'standby';
+  const packetSeqRef = useRef<number>(1);
+  const timersRef = useRef<number[]>([]);
 
-        return {
-          ...svc,
-          status,
-          livePing: probe.ok && !isCvDegraded,
-          latencyMs: isCvDegraded ? 0 : probe.latencyMs,
-          replicas: isCvDegraded ? 0 : svc.replicas,
-          rps: isCvDegraded ? 0 : Math.max(2, svc.rps + (Math.floor(Math.random() * 5) - 2)),
-        };
-      })
-    );
-    setServices(results);
-    setLastProbeTime(new Date().toLocaleTimeString());
-    setIsProbing(false);
-  }, [isFaultTolerantDemoMode]);
+  const clearScheduledTimers = () => {
+    timersRef.current.forEach((id) => window.clearTimeout(id));
+    timersRef.current = [];
+  };
 
   useEffect(() => {
-    runHealthProbes();
-    const interval = window.setInterval(runHealthProbes, 5000);
-    return () => window.clearInterval(interval);
-  }, [runHealthProbes]);
+    return () => clearScheduledTimers();
+  }, []);
 
-  // Live telemetry & log stream ticker
+  // Smooth 30fps animation loop for in-flight message packets
   useEffect(() => {
-    const ticker = window.setInterval(() => {
-      // Update queue metrics
-      setQueues((prev) =>
-        prev.map((q) => {
-          if (q.id === 'camera-queue') {
-            if (isFaultTolerantDemoMode) {
-              return {
-                ...q,
-                readyMessages: q.readyMessages + Math.floor(Math.random() * 6) + 4,
-                unackedMessages: 0,
-                publishRate: +(8.0 + Math.random() * 1.8).toFixed(1),
-                consumeRate: 0.0,
-                consumers: 0,
-                status: 'retaining',
-              };
-            }
-            const nextReady = Math.max(0, Math.min(9, q.readyMessages + (Math.floor(Math.random() * 5) - 2)));
-            const pub = +(7.8 + Math.random() * 1.6).toFixed(1);
-            return {
-              ...q,
-              readyMessages: nextReady,
-              unackedMessages: Math.floor(Math.random() * 3) + 1,
-              publishRate: pub,
-              consumeRate: +(pub + (Math.random() * 0.4 - 0.1)).toFixed(1),
-              consumers: 3,
-              status: 'flowing',
-            };
-          }
-          // logs-queue
-          const pubLogs = +(12.5 + Math.random() * 4.2).toFixed(1);
-          return {
-            ...q,
-            readyMessages: Math.floor(Math.random() * 3),
-            unackedMessages: 1,
-            publishRate: pubLogs,
-            consumeRate: pubLogs,
-            consumers: 1,
-            status: 'flowing',
-          };
-        })
+    let rafId: number;
+    const step = (ts: number) => {
+      setNowTick(ts);
+      setPackets((prev) =>
+        prev.filter((pkt) => ts - pkt.startedAt < pkt.durationMs)
       );
+      rafId = window.requestAnimationFrame(step);
+    };
+    rafId = window.requestAnimationFrame(step);
+    return () => window.cancelAnimationFrame(rafId);
+  }, []);
 
-      // Update storage counters
-      setStorages((prev) =>
-        prev.map((st) => {
-          if (st.id === 'results-db') {
-            return {
-              ...st,
-              recordsCount: isFaultTolerantDemoMode ? st.recordsCount : st.recordsCount + Math.floor(Math.random() * 8) + 2,
-              iops: isFaultTolerantDemoMode ? 12 : 58 + Math.floor(Math.random() * 20),
-            };
-          }
-          if (st.id === 'clips-db') {
-            return {
-              ...st,
-              recordsCount: st.recordsCount + 1,
-              storageSizeMb: st.storageSizeMb + 2,
-              iops: 26 + Math.floor(Math.random() * 12),
-            };
-          }
-          return st;
-        })
-      );
+  const pulseNodeProcessing = useCallback((nodeId: NodeId, statusLabel: string, durationMs = 700) => {
+    setProcessingNodes((prev) => ({ ...prev, [nodeId]: statusLabel }));
+    const t = window.setTimeout(() => {
+      setProcessingNodes((prev) => ({ ...prev, [nodeId]: null }));
+    }, durationMs);
+    timersRef.current.push(t);
+  }, []);
 
-      // Append live distributed log entry if not paused
-      if (!isLogStreamPaused) {
-        logCounterRef.current += 1;
-        const seq = logCounterRef.current;
-        const cams = ['CAM-MVD-101', 'CAM-MVD-102', 'CAM-MVD-103', 'CAM-MVD-104', 'CAM-MVD-107'];
-        const cam = cams[seq % cams.length];
-        const ts = formatJoacoTimestamp(new Date());
+  const spawnPacket = useCallback(
+    (
+      linkId: string,
+      label: string,
+      durationMs = 820,
+      onArrive?: () => void
+    ) => {
+      const link = DIAGRAM_LINKS.find((l) => l.id === linkId);
+      if (!link) return;
+      const id = `pkt-${packetSeqRef.current++}`;
+      const startedAt = performance.now();
 
-        let newEntry: DistributedLogEntry;
-        if (isFaultTolerantDemoMode) {
-          newEntry =
-            seq % 2 === 0
-              ? {
-                  id: `log-${seq}`,
-                  timestamp: ts,
-                  service: 'RABBITMQ',
-                  level: 'WARN',
-                  queue: 'camera_processing_queue',
-                  message: `Workers cv-module unreachable (0 consumers) · Buffering frame ${cam} in durable queue camera_processing_queue`,
-                }
-              : {
-                  id: `log-${seq}`,
-                  timestamp: ts,
-                  service: 'API-REST',
-                  level: 'INFO',
-                  queue: 'logs_queue',
-                  message: `Serving last consolidated snapshot from results-db:5434 (Stateless BFF fallback active)`,
-                };
-        } else {
-          const templates: DistributedLogEntry[] = [
-            {
-              id: `log-${seq}`,
-              timestamp: ts,
-              service: 'EDGE-PROC',
-              level: 'INFO',
-              queue: 'camera_processing_queue',
-              message: `Frame batch #${seq} from ${cam} stored in MinIO (clips-db:9000) -> published to camera_processing_queue`,
-            },
-            {
-              id: `log-${seq}`,
-              timestamp: ts,
-              service: 'CV-MODULE',
-              level: 'ACK',
-              queue: 'camera_processing_queue',
-              message: `cv-worker-0${(seq % 3) + 1} ACK frame #${seq} (${cam}) · inference 42ms · INSERT INTO results_db`,
-            },
-            {
-              id: `log-${seq}`,
-              timestamp: ts,
-              service: 'API-REST',
-              level: 'INFO',
-              queue: 'logs_queue',
-              message: `Message pushed into logs-queue: ([${ts}] GET /api/intersections 200 OK -> 8 nodes)`,
-            },
-            {
-              id: `log-${seq}`,
-              timestamp: ts,
-              service: 'MONITORING',
-              level: 'INFO',
-              queue: 'logs_queue',
-              message: `Pipeline consumed batch from logs_queue (amqp://logs-queue:5672) · 6/6 microservices healthy`,
-            },
-            {
-              id: `log-${seq}`,
-              timestamp: ts,
-              service: 'AUTH-SERVICE',
-              level: 'ACK',
-              queue: 'logs_queue',
-              message: `Token JWT HS256 verified for session role="Administrador" against auth-db:5433`,
-            },
-          ];
-          newEntry = templates[seq % templates.length];
-        }
+      setPackets((prev) => [
+        ...prev.slice(-18),
+        {
+          id,
+          linkId: link.id,
+          from: link.from,
+          to: link.to,
+          label,
+          color: link.color,
+          startedAt,
+          durationMs,
+        },
+      ]);
 
-        setLogs((prev) => [newEntry, ...prev.slice(0, 39)]);
+      if (onArrive) {
+        const t = window.setTimeout(onArrive, durationMs);
+        timersRef.current.push(t);
       }
-    }, 2200);
+    },
+    []
+  );
 
-    return () => window.clearInterval(ticker);
-  }, [isFaultTolerantDemoMode, isLogStreamPaused]);
+  const appendLog = useCallback(
+    (
+      service: Exclude<LogSource, 'ALL'>,
+      level: 'INFO' | 'WARN' | 'ACK',
+      queue: 'logs_queue' | 'camera_processing_queue',
+      message: string
+    ) => {
+      const entry: DistributedLogEntry = {
+        id: `log-${packetSeqRef.current++}`,
+        timestamp: formatJoacoTimestamp(new Date()),
+        service,
+        level,
+        queue,
+        message,
+      };
+      setLogs((prev) => [entry, ...prev.slice(0, 34)]);
+    },
+    []
+  );
+
+  // Flow 1: Camera Frame Ingestion -> S3 + RabbitMQ -> CV Worker -> Results DB -> Logs Queue
+  const triggerCameraPipelineFlow = useCallback(() => {
+    const cams = ['CAM-MVD-101', 'CAM-MVD-102', 'CAM-MVD-103', 'CAM-MVD-104', 'CAM-MVD-107'];
+    const cam = cams[Math.floor(Math.random() * cams.length)];
+
+    // Step 1: Edge processor captures clip
+    pulseNodeProcessing('edge-processor', `CAPTURANDO ${cam}`, 650);
+
+    // Step 1a: Edge uploads MP4 to MinIO S3
+    spawnPacket('edge-processor->clips-db', `PUT ${cam}.mp4`, 750, () => {
+      pulseNodeProcessing('clips-db', 'S3 WRITE OK', 550);
+      setClipsCount((c) => c + 1);
+    });
+
+    // Step 1b: Edge publishes metadata event to camera-queue
+    spawnPacket('edge-processor->camera-queue', `ENQUEUE ${cam}`, 820, () => {
+      if (isFaultTolerantDemoMode) {
+        pulseNodeProcessing('camera-queue', 'RETENIENDO MSG', 950);
+        setCameraQueueReady((q) => q + 1);
+        appendLog(
+          'RABBITMQ',
+          'WARN',
+          'camera_processing_queue',
+          `cv-module workers offline · Frame ${cam} buffered in durable queue camera_processing_queue`
+        );
+        return;
+      }
+
+      pulseNodeProcessing('camera-queue', 'ROUTING AMQP', 500);
+      setCameraQueueReady((q) => Math.max(1, (q % 5) + 1));
+
+      // Step 2: camera-queue dispatches to cv-module worker
+      spawnPacket('camera-queue->cv-module', `FRAME ${cam}`, 820, () => {
+        pulseNodeProcessing('cv-module', `YOLO INFERENCE · ${cam}`, 900);
+
+        // Step 3a: cv-module writes vehicle count to results-db
+        const tAfterInference = window.setTimeout(() => {
+          const count = Math.floor(Math.random() * 75) + 28;
+          spawnPacket('cv-module->results-db', `INSERT ${count} VEH`, 740, () => {
+            pulseNodeProcessing('results-db', 'COMMIT SQL', 550);
+            setResultsDbCount((r) => r + 1);
+          });
+
+          // Step 3b: cv-module pushes audit log to logs-queue
+          spawnPacket('cv-module->logs-queue', `LOG ACK ${cam}`, 780, () => {
+            pulseNodeProcessing('logs-queue', 'ENQUEUE LOG', 500);
+            appendLog(
+              'CV-MODULE',
+              'ACK',
+              'camera_processing_queue',
+              `Processed ${cam} (${count} veh) -> committed to results-db:5434`
+            );
+            spawnPacket('logs-queue->monitoring-pipeline', 'METRIC BATCH', 700, () => {
+              pulseNodeProcessing('monitoring-pipeline', 'INDEXED', 500);
+            });
+          });
+        }, 420);
+        timersRef.current.push(tAfterInference);
+      });
+    });
+  }, [appendLog, isFaultTolerantDemoMode, pulseNodeProcessing, spawnPacket]);
+
+  // Flow 2: Login / Auth JWT validation + Joaco's logs_queue push
+  const triggerAuthFlow = useCallback(() => {
+    pulseNodeProcessing('frontend', 'POST /login', 500);
+
+    spawnPacket('frontend->api-rest', 'POST /login', 680, () => {
+      pulseNodeProcessing('api-rest', 'AUTH PROXY', 650);
+
+      // Joaco's rabbitMQpush to logs-queue
+      spawnPacket('api-rest->logs-queue', 'LOG: Login req', 760, () => {
+        pulseNodeProcessing('logs-queue', 'MSG QUEUED', 450);
+        setLogsQueueReady((c) => (c % 3) + 1);
+        appendLog(
+          'API-REST',
+          'INFO',
+          'logs_queue',
+          'Login request received, sending to auth service'
+        );
+        spawnPacket('logs-queue->monitoring-pipeline', 'CONSUME LOG', 680, () => {
+          pulseNodeProcessing('monitoring-pipeline', 'HEARTBEAT OK', 500);
+        });
+      });
+
+      // Forward credentials to auth-service
+      spawnPacket('api-rest->auth-service', 'VERIFY CREDENTIALS', 740, () => {
+        pulseNodeProcessing('auth-service', 'SIGNING JWT', 700);
+
+        spawnPacket('auth-service->auth-db', 'SELECT user', 640, () => {
+          pulseNodeProcessing('auth-db', 'ROW MATCH', 520);
+          appendLog(
+            'AUTH-SERVICE',
+            'ACK',
+            'logs_queue',
+            'Login response received from auth service, sending to frontend (JWT HS256)'
+          );
+        });
+      });
+    });
+  }, [appendLog, pulseNodeProcessing, spawnPacket]);
+
+  // Flow 3: Dashboard Telemetry Query (Frontend -> BFF -> Visualization -> Results DB)
+  const triggerTelemetryQueryFlow = useCallback(() => {
+    pulseNodeProcessing('frontend', 'GET /intersections', 500);
+    spawnPacket('frontend->api-rest', 'GET /intersections', 660, () => {
+      pulseNodeProcessing('api-rest', 'BFF QUERY', 600);
+      spawnPacket('visualization-backend->api-rest', '8 NODES JSON', 740, () => {
+        pulseNodeProcessing('visualization-backend', 'AGGREGATING', 650);
+      });
+      spawnPacket('results-db->visualization-backend', 'TIME SERIES', 720, () => {
+        pulseNodeProcessing('results-db', 'SELECT SNAPSHOT', 520);
+      });
+    });
+  }, [pulseNodeProcessing, spawnPacket]);
+
+  // Automatic background orchestration so the deployment diagram is always alive
+  useEffect(() => {
+    if (isSimPaused) return;
+    const t0 = window.setTimeout(() => triggerCameraPipelineFlow(), 350);
+    let step = 0;
+    const interval = window.setInterval(() => {
+      step += 1;
+      if (step % 3 === 0) {
+        triggerAuthFlow();
+      } else if (step % 3 === 1) {
+        triggerCameraPipelineFlow();
+      } else {
+        triggerCameraPipelineFlow();
+        triggerTelemetryQueryFlow();
+      }
+    }, 2600);
+
+    return () => {
+      window.clearTimeout(t0);
+      window.clearInterval(interval);
+    };
+  }, [isSimPaused, triggerAuthFlow, triggerCameraPipelineFlow, triggerTelemetryQueryFlow]);
+
+  const linkGeometries = useMemo(
+    () =>
+      DIAGRAM_LINKS.map((link) => ({
+        link,
+        ...buildLinkPath(link),
+      })),
+    []
+  );
+
+  const selectedNode = NODE_MAP[selectedNodeId];
+  const inboundLinks = DIAGRAM_LINKS.filter((l) => l.to === selectedNodeId);
+  const outboundLinks = DIAGRAM_LINKS.filter((l) => l.from === selectedNodeId);
 
   const filteredLogs =
     logFilter === 'ALL' ? logs : logs.filter((entry) => entry.service === logFilter);
 
-  const onlineServicesCount = services.filter((s) => s.status !== 'degraded').length;
-  const totalReadyQueued = queues.reduce((acc, q) => acc + q.readyMessages, 0);
+  const getNodeMetricBadge = (nodeId: NodeId): string => {
+    switch (nodeId) {
+      case 'frontend':
+        return 'SPA · JWT ACTIVE';
+      case 'api-rest':
+        return 'BFF · 24 req/s';
+      case 'auth-service':
+        return 'HS256 · ONLINE';
+      case 'auth-db':
+        return '12 USERS · :5433';
+      case 'edge-processor':
+        return '8 CAMERAS · 8 fps';
+      case 'camera-queue':
+        return isFaultTolerantDemoMode
+          ? `${cameraQueueReady} MSG RETAINED`
+          : `${cameraQueueReady} READY · 8.4/s`;
+      case 'cv-module':
+        return isFaultTolerantDemoMode ? '0/3 WORKERS (PAUSED)' : '3/3 WORKERS · 42ms';
+      case 'results-db':
+        return `${resultsDbCount.toLocaleString()} ROWS`;
+      case 'clips-db':
+        return `${clipsCount} MP4 CLIPS`;
+      case 'visualization-backend':
+        return 'SERIES · 12 req/s';
+      case 'logs-queue':
+        return `${logsQueueReady} READY · 14.5/s`;
+      case 'monitoring-pipeline':
+        return '11/11 NODES WATCHED';
+    }
+  };
 
   return (
-    <main className="sys-workspace" aria-label="Panel de estado del backend distribuido">
+    <main className="sys-workspace" aria-label="Diagrama de despliegue e interacción de componentes">
       {/* Top operational subheader */}
       <div className="sys-subheader">
         <div className="sys-subheader-left">
-          <span className="sys-admin-badge">ADMIN ONLY · BACKEND TELEMETRY</span>
-          <h1 className="sys-title">Topología y Estado del Sistema Distribuido</h1>
+          <span className="sys-admin-badge">ADMIN ONLY · DEPLOYMENT & MESSAGE FLOW</span>
+          <h1 className="sys-title">Diagrama de Componentes y Flujo de Mensajes en Vivo</h1>
           <span className="sys-subtitle">
-            docker-compose · red <code>distributed_net</code> · 11 contenedores
+            Red <code>distributed_net</code> · 12 nodos · Paquetes AMQP / HTTP / SQL / S3 en tiempo real
           </span>
         </div>
 
         <div className="sys-subheader-right">
-          <div className="sys-summary-pills">
-            <span className="sys-stat-pill">
-              <span className={`status-dot ${isFaultTolerantDemoMode ? 'moderado' : 'fluido'}`} />
-              SERVICIOS <strong>{onlineServicesCount}/6</strong>
-            </span>
-            <span className="sys-stat-pill">
-              <span className="status-dot fluido" />
-              COLAS AMQP <strong>2/2</strong> ({totalReadyQueued} MSG)
-            </span>
-            <span className="sys-stat-pill">
-              <span className="status-dot fluido" />
-              STORAGE <strong>3/3</strong>
-            </span>
-          </div>
+          <button
+            type="button"
+            className="sim-btn primary"
+            onClick={triggerCameraPipelineFlow}
+            id="btn-inject-frame"
+            title="Disparar manualmente un lote de video desde Edge Processor hacia S3, RabbitMQ, CV Workers y PostgreSQL"
+          >
+            <Send size={13} strokeWidth={1.75} />
+            <span>Inyectar Frame CV</span>
+          </button>
+
+          <button
+            type="button"
+            className="sim-btn"
+            onClick={triggerAuthFlow}
+            id="btn-inject-login"
+            title="Disparar flujo POST /login -> Auth Service + Auth DB y log en RabbitMQ logs_queue"
+          >
+            <Zap size={13} strokeWidth={1.75} />
+            <span>Simular POST /login</span>
+          </button>
 
           <button
             type="button"
             className={`sim-btn ${isFaultTolerantDemoMode ? 'active danger' : ''}`}
             onClick={onToggleFaultTolerance}
             id="btn-sys-fault-toggle"
-            title="Simular caída del pool de workers cv-module para observar cómo camera_processing_queue retiene los eventos sin pérdida"
+            title="Pausar workers cv-module para observar cómo los paquetes quedan retenidos en camera-queue sin pérdida"
           >
             <ShieldAlert size={14} strokeWidth={1.75} />
             <span>
-              {isFaultTolerantDemoMode ? 'Restaurar Workers CV' : 'Simular Caída Workers CV'}
+              {isFaultTolerantDemoMode ? 'Restaurar Workers CV' : 'Caída Workers CV'}
             </span>
           </button>
 
           <button
             type="button"
-            className="sim-btn primary"
-            onClick={runHealthProbes}
-            disabled={isProbing}
-            id="btn-sys-probe"
+            className="sim-btn"
+            onClick={() => setIsSimPaused((p) => !p)}
+            id="btn-pause-flow"
           >
-            <RefreshCw size={14} strokeWidth={1.75} />
-            <span>Ping /health ({lastProbeTime})</span>
+            {isSimPaused ? <Play size={13} strokeWidth={1.75} /> : <Pause size={13} strokeWidth={1.75} />}
+            <span>{isSimPaused ? 'Reanudar Flujo' : 'Pausar'}</span>
           </button>
         </div>
       </div>
 
       <div className="sys-content">
-        {/* SECTION 1: END-TO-END PIPELINE TOPOLOGY */}
-        <section className="sys-section" aria-label="Flujo de arquitectura y topología">
-          <div className="sys-section-head">
-            <div className="sys-section-title">
-              <Layers size={15} strokeWidth={1.75} />
-              <span>1. Pipeline de Procesamiento y Flujo entre Contenedores</span>
-            </div>
-            <span className="sys-section-meta">
-              INGESTA EDGE → COLA RABBITMQ → WORKERS CV → POSTGRESQL / S3 → BFF FASTAPI
-            </span>
-          </div>
-
-          <div className="sys-pipeline-flow">
-            {/* Stage 1: Ingestion */}
-            <div className="sys-flow-stage">
-              <div className="sys-stage-label">01 · INGESTA EDGE</div>
-              <div className="sys-flow-node">
-                <div className="sys-flow-node-top">
-                  <span className="status-dot fluido" />
-                  <code>edge-processor</code>
-                  <span className="sys-port">:8001</span>
-                </div>
-                <div className="sys-flow-node-desc">Captura frames y sube MP4 a MinIO</div>
-              </div>
-              <div className="sys-flow-node storage">
-                <div className="sys-flow-node-top">
-                  <HardDrive size={12} strokeWidth={1.75} />
-                  <code>clips-db (MinIO S3)</code>
-                  <span className="sys-port">:9000</span>
-                </div>
-                <div className="sys-flow-node-desc">Bucket s3://clips ({storages[2].recordsCount} clips)</div>
-              </div>
-            </div>
-
-            <div className="sys-flow-arrow">
-              <span className="sys-flow-protocol">AMQP :5672</span>
-              <ArrowRight size={16} strokeWidth={1.75} />
-            </div>
-
-            {/* Stage 2: Message Broker 1 */}
-            <div className="sys-flow-stage">
-              <div className="sys-stage-label">02 · BROKER DE EVENTOS</div>
-              <div className={`sys-flow-node queue ${isFaultTolerantDemoMode ? 'warning' : ''}`}>
-                <div className="sys-flow-node-top">
-                  <span className={`status-dot ${isFaultTolerantDemoMode ? 'moderado' : 'fluido'}`} />
-                  <code>camera-queue</code>
-                  <span className="sys-port">:5672</span>
-                </div>
-                <div className="sys-flow-node-desc">
-                  Queue: <code>camera_processing_queue</code>
-                </div>
-                <div className="sys-flow-badge">
-                  {queues[0].readyMessages} READY · {queues[0].publishRate} msg/s
-                </div>
-              </div>
-            </div>
-
-            <div className={`sys-flow-arrow ${isFaultTolerantDemoMode ? 'paused' : ''}`}>
-              <span className="sys-flow-protocol">
-                {isFaultTolerantDemoMode ? 'PAUSED (0 ACK)' : '3 WORKERS'}
+        {/* MAIN COMPONENT & DEPLOYMENT GRAPH + SIDE INSPECTOR */}
+        <section className="sys-diagram-shell" aria-label="Grafo interactivo de contenedores">
+          <div className="sys-diagram-stage">
+            <div className="sys-diagram-legend">
+              <span className="legend-pill">
+                <i style={{ background: '#F59E0B' }} /> AMQP RabbitMQ
               </span>
-              <ArrowRight size={16} strokeWidth={1.75} />
+              <span className="legend-pill">
+                <i style={{ background: '#10B981' }} /> Inferencia CV & SQL Insert
+              </span>
+              <span className="legend-pill">
+                <i style={{ background: '#3B82F6' }} /> HTTP / BFF / Consultas
+              </span>
+              <span className="legend-pill">
+                <i style={{ background: '#A855F7' }} /> Auth & JWT
+              </span>
+              <span className="legend-pill">
+                <i style={{ background: '#38BDF8' }} /> MinIO S3 & Telemetría
+              </span>
             </div>
 
-            {/* Stage 3: CV Workers & Persistence */}
-            <div className="sys-flow-stage">
-              <div className="sys-stage-label">03 · CÓMPUTO CV & PERSISTENCIA</div>
-              <div className={`sys-flow-node ${isFaultTolerantDemoMode ? 'degraded' : ''}`}>
-                <div className="sys-flow-node-top">
-                  <span className={`status-dot ${isFaultTolerantDemoMode ? 'congestionado' : 'fluido'}`} />
-                  <code>cv-module</code>
-                  <span className="sys-port">:8002</span>
-                </div>
-                <div className="sys-flow-node-desc">
-                  {isFaultTolerantDemoMode
-                    ? 'Workers detenidos (simulando fallo)'
-                    : 'Inferencia YOLO · Conteo vehicular'}
-                </div>
-              </div>
-              <div className="sys-flow-node storage">
-                <div className="sys-flow-node-top">
-                  <Database size={12} strokeWidth={1.75} />
-                  <code>results-db (PG 16)</code>
-                  <span className="sys-port">:5434</span>
-                </div>
-                <div className="sys-flow-node-desc">
-                  {storages[1].recordsCount.toLocaleString()} registros consolidados
-                </div>
-              </div>
-            </div>
+            <svg
+              className="sys-diagram-svg"
+              viewBox="0 0 1260 590"
+              preserveAspectRatio="xMidYMid meet"
+              data-testid="deployment-diagram-svg"
+            >
+              <defs>
+                <pattern id="sys-grid" width="28" height="28" patternUnits="userSpaceOnUse">
+                  <path
+                    d="M 28 0 L 0 0 0 28"
+                    fill="none"
+                    stroke="rgba(255,255,255,0.03)"
+                    strokeWidth="1"
+                  />
+                </pattern>
+                <filter id="pkt-glow" x="-50%" y="-50%" width="200%" height="200%">
+                  <feGaussianBlur stdDeviation="3.2" result="blur" />
+                  <feMerge>
+                    <feMergeNode in="blur" />
+                    <feMergeNode in="SourceGraphic" />
+                  </feMerge>
+                </filter>
+              </defs>
 
-            <div className="sys-flow-arrow">
-              <span className="sys-flow-protocol">SQL / HTTP</span>
-              <ArrowRight size={16} strokeWidth={1.75} />
-            </div>
+              {/* Subtle engineering grid background */}
+              <rect width="1260" height="590" fill="url(#sys-grid)" />
 
-            {/* Stage 4: BFF, Auth & Visualization */}
-            <div className="sys-flow-stage">
-              <div className="sys-stage-label">04 · CAPA BFF & ACCESO</div>
-              <div className="sys-flow-node highlight">
-                <div className="sys-flow-node-top">
-                  <span className="status-dot fluido" />
-                  <code>api-rest (BFF)</code>
-                  <span className="sys-port">:8000</span>
-                </div>
-                <div className="sys-flow-node-desc">POST /login · GET /api/intersections</div>
-              </div>
-              <div className="sys-flow-subrow">
-                <div className="sys-flow-mini">
-                  <code>auth-service :8005</code> + <code>auth-db :5433</code>
-                </div>
-                <div className="sys-flow-mini">
-                  <code>visualization-backend :8003</code>
-                </div>
-              </div>
-            </div>
+              {/* Deployment Tier Swimlanes */}
+              <g className="sys-swimlanes">
+                <rect
+                  x="22"
+                  y="24"
+                  width="1216"
+                  height="146"
+                  rx="8"
+                  fill="rgba(255,255,255,0.01)"
+                  stroke="rgba(255,255,255,0.05)"
+                  strokeDasharray="4 6"
+                />
+                <text x="36" y="42" className="sys-lane-label">
+                  PLANO DE ACCESO, BFF GATEWAY & AUTENTICACIÓN JWT
+                </text>
 
-            <div className="sys-flow-arrow">
-              <span className="sys-flow-protocol">AMQP :5673</span>
-              <ArrowRight size={16} strokeWidth={1.75} />
-            </div>
+                <rect
+                  x="22"
+                  y="214"
+                  width="1216"
+                  height="160"
+                  rx="8"
+                  fill="rgba(255,255,255,0.012)"
+                  stroke="rgba(255,255,255,0.05)"
+                  strokeDasharray="4 6"
+                />
+                <text x="36" y="232" className="sys-lane-label">
+                  PLANO DE PROCESAMIENTO ASÍNCRONO DE VIDEO (EDGE → RABBITMQ → CV WORKERS → POSTGRESQL)
+                </text>
 
-            {/* Stage 5: Observability */}
-            <div className="sys-flow-stage">
-              <div className="sys-stage-label">05 · OBSERVABILIDAD</div>
-              <div className="sys-flow-node queue">
-                <div className="sys-flow-node-top">
-                  <span className="status-dot fluido" />
-                  <code>logs-queue</code>
-                  <span className="sys-port">:5673</span>
-                </div>
-                <div className="sys-flow-node-desc">
-                  Queue: <code>logs_queue</code> ({queues[1].publishRate} msg/s)
-                </div>
-              </div>
-              <div className="sys-flow-node">
-                <div className="sys-flow-node-top">
-                  <span className="status-dot fluido" />
-                  <code>monitoring-pipeline</code>
-                  <span className="sys-port">:8004</span>
-                </div>
-                <div className="sys-flow-node-desc">Agregador de logs y métricas</div>
-              </div>
-            </div>
+                <rect
+                  x="22"
+                  y="414"
+                  width="1216"
+                  height="152"
+                  rx="8"
+                  fill="rgba(255,255,255,0.01)"
+                  stroke="rgba(255,255,255,0.05)"
+                  strokeDasharray="4 6"
+                />
+                <text x="36" y="432" className="sys-lane-label">
+                  PLANO DE OBJECT STORAGE (MINIO S3), ANALÍTICA Y OBSERVABILIDAD DISTRIBUIDA
+                </text>
+              </g>
+
+              {/* Directed Connector Paths + Protocol Badges */}
+              {linkGeometries.map(({ link, d, p0, p1, p2 }) => {
+                const isBlockedCvLink =
+                  isFaultTolerantDemoMode &&
+                  (link.id === 'camera-queue->cv-module' ||
+                    link.id === 'cv-module->results-db' ||
+                    link.id === 'cv-module->logs-queue');
+
+                const isHighlighted =
+                  link.from === selectedNodeId || link.to === selectedNodeId;
+
+                const [labelX, labelY] = pointOnQuadBezier(p0, p1, p2, 0.5);
+
+                return (
+                  <g key={link.id} className="sys-link-group">
+                    {/* Base subtle halo when selected */}
+                    {isHighlighted && (
+                      <path
+                        d={d}
+                        fill="none"
+                        stroke={link.color}
+                        strokeWidth="5"
+                        strokeOpacity="0.16"
+                      />
+                    )}
+
+                    {/* Main wire */}
+                    <path
+                      d={d}
+                      fill="none"
+                      stroke={isBlockedCvLink ? '#EF4444' : isHighlighted ? link.color : 'rgba(255,255,255,0.16)'}
+                      strokeWidth={isHighlighted ? 2 : 1.4}
+                      strokeDasharray={isBlockedCvLink ? '4 6' : undefined}
+                      strokeOpacity={isBlockedCvLink ? 0.5 : 0.9}
+                    />
+
+                    {/* Protocol label pill on wire */}
+                    <g transform={`translate(${labelX}, ${labelY})`}>
+                      <rect
+                        x="-48"
+                        y="-9"
+                        width="96"
+                        height="18"
+                        rx="4"
+                        fill="#09090B"
+                        stroke={isBlockedCvLink ? 'rgba(239,68,68,0.45)' : 'rgba(255,255,255,0.1)'}
+                      />
+                      <text
+                        x="0"
+                        y="3.5"
+                        textAnchor="middle"
+                        className="sys-wire-label"
+                        fill={isBlockedCvLink ? '#EF4444' : '#A1A1AA'}
+                      >
+                        {isBlockedCvLink ? 'PAUSED' : link.protocol}
+                      </text>
+                    </g>
+                  </g>
+                );
+              })}
+
+              {/* Component / Container Nodes */}
+              {DIAGRAM_NODES.map((node) => {
+                const isSelected = node.id === selectedNodeId;
+                const isCvDegraded = isFaultTolerantDemoMode && node.id === 'cv-module';
+                const isQueueRetaining = isFaultTolerantDemoMode && node.id === 'camera-queue';
+                const activeProcessLabel = processingNodes[node.id];
+                const isProcessing = Boolean(activeProcessLabel) && !isCvDegraded;
+
+                const width = 212;
+                const height = 88;
+                const x = node.cx - width / 2;
+                const y = node.cy - height / 2;
+
+                const borderColor = isCvDegraded
+                  ? '#EF4444'
+                  : isQueueRetaining
+                  ? '#F59E0B'
+                  : isSelected
+                  ? '#3B82F6'
+                  : isProcessing
+                  ? '#10B981'
+                  : 'rgba(255,255,255,0.13)';
+
+                const statusColor = isCvDegraded
+                  ? '#EF4444'
+                  : isQueueRetaining
+                  ? '#F59E0B'
+                  : '#10B981';
+
+                return (
+                  <g
+                    key={node.id}
+                    transform={`translate(${x}, ${y})`}
+                    className={`sys-node-group ${isSelected ? 'selected' : ''} ${
+                      isProcessing ? 'processing' : ''
+                    }`}
+                    onClick={() => setSelectedNodeId(node.id)}
+                    data-testid={`diagram-node-${node.id}`}
+                    style={{ cursor: 'pointer' }}
+                  >
+                    {/* Outer active processing halo */}
+                    {(isProcessing || isSelected) && (
+                      <rect
+                        x="-3"
+                        y="-3"
+                        width={width + 6}
+                        height={height + 6}
+                        rx="9"
+                        fill="none"
+                        stroke={isSelected ? '#3B82F6' : '#10B981'}
+                        strokeOpacity={isProcessing ? '0.45' : '0.3'}
+                        strokeWidth="2"
+                      />
+                    )}
+
+                    {/* Node Card Body */}
+                    <rect
+                      width={width}
+                      height={height}
+                      rx="7"
+                      fill="#111114"
+                      stroke={borderColor}
+                      strokeWidth={isSelected || isProcessing ? '1.6' : '1'}
+                    />
+
+                    {/* Top Header Strip */}
+                    <rect
+                      x="1"
+                      y="1"
+                      width={width - 2}
+                      height="24"
+                      rx="6"
+                      fill="rgba(255,255,255,0.03)"
+                    />
+
+                    {/* Status Dot + Container Name + Port */}
+                    <circle cx="14" cy="13" r="3.8" fill={statusColor} />
+                    {isProcessing && (
+                      <circle
+                        cx="14"
+                        cy="13"
+                        r="7"
+                        fill="none"
+                        stroke="#10B981"
+                        strokeWidth="1.2"
+                        className="sys-node-pulse-ring"
+                      />
+                    )}
+                    <text x="24" y="16.5" className="sys-node-container">
+                      {node.container}
+                    </text>
+                    <text x={width - 10} y="16.5" textAnchor="end" className="sys-node-port">
+                      {node.port}
+                    </text>
+
+                    {/* Title & Stack */}
+                    <text x="12" y="44" className="sys-node-title">
+                      {node.title}
+                    </text>
+                    <text x="12" y="59" className="sys-node-tech">
+                      {node.tech}
+                    </text>
+
+                    {/* Bottom Telemetry / Processing Pill */}
+                    <rect
+                      x="10"
+                      y="66"
+                      width={width - 20}
+                      height="16"
+                      rx="3"
+                      fill={
+                        isCvDegraded
+                          ? 'rgba(239,68,68,0.15)'
+                          : isProcessing
+                          ? 'rgba(16,185,129,0.16)'
+                          : 'rgba(255,255,255,0.04)'
+                      }
+                    />
+                    <text
+                      x="16"
+                      y="77"
+                      className="sys-node-metric"
+                      fill={
+                        isCvDegraded
+                          ? '#EF4444'
+                          : isProcessing
+                          ? '#34D399'
+                          : '#A1A1AA'
+                      }
+                    >
+                      {activeProcessLabel
+                        ? `● ${activeProcessLabel}`
+                        : getNodeMetricBadge(node.id)}
+                    </text>
+                  </g>
+                );
+              })}
+
+              {/* Animated In-Flight Message Packets (rendered on top of nodes & wires) */}
+              {packets.map((pkt) => {
+                const geom = linkGeometries.find((g) => g.link.id === pkt.linkId);
+                if (!geom) return null;
+                const progress = Math.min(
+                  1,
+                  Math.max(0, (nowTick - pkt.startedAt) / pkt.durationMs)
+                );
+                // Travel along the visible wire segment between card edges (t = 0.24 -> 0.76)
+                const wireT = 0.24 + progress * 0.52;
+                const [x, y] = pointOnQuadBezier(geom.p0, geom.p1, geom.p2, wireT);
+
+                return (
+                  <g
+                    key={pkt.id}
+                    transform={`translate(${x}, ${y})`}
+                    className="sys-packet"
+                    style={{ pointerEvents: 'none' }}
+                  >
+                    <circle
+                      r="5.5"
+                      fill={pkt.color}
+                      filter="url(#pkt-glow)"
+                    />
+                    <circle r="2.2" fill="#FAFAFA" />
+                    <g transform="translate(0, -14)">
+                      <rect
+                        x="-48"
+                        y="-10"
+                        width="96"
+                        height="16"
+                        rx="3"
+                        fill="rgba(9, 9, 11, 0.95)"
+                        stroke={pkt.color}
+                        strokeWidth="1"
+                      />
+                      <text
+                        x="0"
+                        y="1"
+                        textAnchor="middle"
+                        className="sys-packet-label"
+                      >
+                        {pkt.label}
+                      </text>
+                    </g>
+                  </g>
+                );
+              })}
+            </svg>
           </div>
+
+          {/* Right Side Component Inspector */}
+          <aside className="sys-node-inspector" aria-label="Inspector del contenedor seleccionado">
+            <div className="sys-inspector-head">
+              <span className="label-caps">CONTENEDOR SELECCIONADO</span>
+              <span className="sys-port-tag">{selectedNode.port}</span>
+            </div>
+
+            <div className="sys-inspector-title-wrap">
+              <div className="sys-inspector-zone">{selectedNode.zone}</div>
+              <h2 className="sys-inspector-title">{selectedNode.title}</h2>
+              <code className="sys-inspector-container">
+                docker://{selectedNode.container}
+                {selectedNode.port}
+              </code>
+            </div>
+
+            <p className="sys-inspector-desc">{selectedNode.role}</p>
+
+            <div className="sys-inspector-kv">
+              <div>
+                <span className="label-caps">Stack</span>
+                <strong>{selectedNode.tech}</strong>
+              </div>
+              <div>
+                <span className="label-caps">Estado Actual</span>
+                <strong
+                  className={
+                    isFaultTolerantDemoMode && selectedNode.id === 'cv-module'
+                      ? 'c-critical'
+                      : 'c-fluid'
+                  }
+                >
+                  {isFaultTolerantDemoMode && selectedNode.id === 'cv-module'
+                    ? 'PAUSADO (DEMO FALLO)'
+                    : processingNodes[selectedNode.id] || 'ONLINE · IDLE'}
+                </strong>
+              </div>
+              <div>
+                <span className="label-caps">Métrica Clave</span>
+                <strong>{getNodeMetricBadge(selectedNode.id)}</strong>
+              </div>
+            </div>
+
+            <div className="sys-inspector-connections">
+              <div className="label-caps">CONEXIONES ENTRANTES ({inboundLinks.length})</div>
+              {inboundLinks.length === 0 ? (
+                <div className="sys-conn-empty">Origen de flujo (sin entradas)</div>
+              ) : (
+                inboundLinks.map((l) => (
+                  <div key={l.id} className="sys-conn-row">
+                    <code>{l.from}</code>
+                    <span className="sys-conn-proto">{l.protocol}</span>
+                  </div>
+                ))
+              )}
+
+              <div className="label-caps" style={{ marginTop: 10 }}>
+                CONEXIONES SALIENTES ({outboundLinks.length})
+              </div>
+              {outboundLinks.length === 0 ? (
+                <div className="sys-conn-empty">Nodo sumidero / almacenamiento</div>
+              ) : (
+                outboundLinks.map((l) => (
+                  <div key={l.id} className="sys-conn-row">
+                    <code>→ {l.to}</code>
+                    <span className="sys-conn-proto">{l.protocol}</span>
+                  </div>
+                ))
+              )}
+            </div>
+          </aside>
         </section>
 
-        {/* SECTION 2: 6 MICROSERVICES HEALTH CARDS */}
-        <section className="sys-section" aria-label="Estado de los 6 microservicios FastAPI">
-          <div className="sys-section-head">
-            <div className="sys-section-title">
-              <Server size={15} strokeWidth={1.75} />
-              <span>2. Microservicios de Aplicación (FastAPI Containers)</span>
-            </div>
-            <span className="sys-section-meta"> PUERTOS 8000 — 8005 · HEALTHCHECKS EN VIVO</span>
-          </div>
-
-          <div className="sys-services-grid">
-            {services.map((svc) => {
-              const dotClass =
-                svc.status === 'degraded'
-                  ? 'congestionado'
-                  : svc.status === 'online'
-                  ? 'fluido'
-                  : 'fluido';
-              return (
-                <article
-                  key={svc.id}
-                  className={`sys-service-card ${svc.status}`}
-                  data-testid={`sys-service-${svc.id}`}
-                >
-                  <div className="sys-card-top">
-                    <div className="sys-card-id">
-                      <span className={`status-dot ${dotClass}`} />
-                      <code>{svc.container}</code>
-                      <span className="sys-port-tag">:{svc.port}</span>
-                    </div>
-                    <span className={`sys-status-chip ${svc.status}`}>
-                      {svc.status === 'degraded'
-                        ? 'PAUSADO'
-                        : svc.livePing
-                        ? 'HTTP 200 · LIVE'
-                        : 'ONLINE · SIM'}
-                    </span>
-                  </div>
-
-                  <div className="sys-card-name">{svc.name}</div>
-                  <div className="sys-card-role">{svc.role}</div>
-
-                  <div className="sys-card-metrics">
-                    <div>
-                      <span className="label-caps">Latencia</span>
-                      <strong>{svc.status === 'degraded' ? '—' : `${svc.latencyMs} ms`}</strong>
-                    </div>
-                    <div>
-                      <span className="label-caps">Workers</span>
-                      <strong>{svc.replicas} inst.</strong>
-                    </div>
-                    <div>
-                      <span className="label-caps">Throughput</span>
-                      <strong>{svc.rps} req/s</strong>
-                    </div>
-                  </div>
-
-                  <div className="sys-card-foot">
-                    <span>{svc.stack}</span>
-                    <code>GET /health</code>
-                  </div>
-                </article>
-              );
-            })}
-          </div>
-        </section>
-
-        {/* SECTION 3: RABBITMQ BROKERS + DATABASES / S3 */}
-        <div className="sys-two-col">
-          {/* Left: 2 RabbitMQ Instances */}
-          <section className="sys-section" aria-label="Colas RabbitMQ">
-            <div className="sys-section-head">
-              <div className="sys-section-title">
-                <Cpu size={15} strokeWidth={1.75} />
-                <span>3. Brokers de Mensajería (RabbitMQ 3.13)</span>
-              </div>
-              <span className="sys-section-meta">AMQP :5672 / :5673</span>
-            </div>
-
-            <div className="sys-stack-list">
-              {queues.map((q) => (
-                <article
-                  key={q.id}
-                  className={`sys-queue-card ${q.status === 'retaining' ? 'retaining' : ''}`}
-                  data-testid={`sys-queue-${q.id}`}
-                >
-                  <div className="sys-queue-head">
-                    <div>
-                      <div className="sys-queue-title">
-                        <span
-                          className={`status-dot ${
-                            q.status === 'retaining' ? 'moderado' : 'fluido'
-                          }`}
-                        />
-                        <code>{q.name}</code>
-                      </div>
-                      <div className="sys-queue-sub">
-                        {q.container} · AMQP <code>:{q.amqpPort}</code> · Mgmt UI{' '}
-                        <code>:{q.mgmtPort}</code>
-                      </div>
-                    </div>
-                    <span className={`sys-status-chip ${q.status}`}>
-                      {q.status === 'retaining' ? 'RETENIENDO EN COLA' : 'FLUJO ACTIVO'}
-                    </span>
-                  </div>
-
-                  <div className="sys-queue-kpis">
-                    <div className="sys-queue-kpi">
-                      <span className="label-caps">En Cola (Ready)</span>
-                      <strong className={q.readyMessages > 15 ? 'c-moderate' : ''}>
-                        {q.readyMessages}
-                      </strong>
-                    </div>
-                    <div className="sys-queue-kpi">
-                      <span className="label-caps">Unacked</span>
-                      <strong>{q.unackedMessages}</strong>
-                    </div>
-                    <div className="sys-queue-kpi">
-                      <span className="label-caps">Publicación</span>
-                      <strong>{q.publishRate} msg/s</strong>
-                    </div>
-                    <div className="sys-queue-kpi">
-                      <span className="label-caps">Consumo</span>
-                      <strong className={q.consumeRate === 0 ? 'c-critical' : 'c-fluid'}>
-                        {q.consumeRate} msg/s
-                      </strong>
-                    </div>
-                    <div className="sys-queue-kpi">
-                      <span className="label-caps">Consumidores</span>
-                      <strong>{q.consumers}</strong>
-                    </div>
-                  </div>
-                </article>
-              ))}
-            </div>
-          </section>
-
-          {/* Right: 3 Storage Engines */}
-          <section className="sys-section" aria-label="Bases de datos y almacenamiento S3">
-            <div className="sys-section-head">
-              <div className="sys-section-title">
-                <Database size={15} strokeWidth={1.75} />
-                <span>4. Persistencia Aislada (PostgreSQL 16 & MinIO S3)</span>
-              </div>
-              <span className="sys-section-meta">PUERTOS :5433 · :5434 · :9000</span>
-            </div>
-
-            <div className="sys-stack-list">
-              {storages.map((st) => (
-                <article key={st.id} className="sys-storage-card" data-testid={`sys-storage-${st.id}`}>
-                  <div className="sys-queue-head">
-                    <div>
-                      <div className="sys-queue-title">
-                        <span className="status-dot fluido" />
-                        <code>{st.container}</code>
-                        <span className="sys-engine-badge">{st.engine}</span>
-                      </div>
-                      <div className="sys-queue-sub">
-                        {st.databaseOrBucket} · Puerto <code>:{st.port}</code>
-                        {st.consolePort ? ` (Console :${st.consolePort})` : ''}
-                      </div>
-                    </div>
-                    <span className="sys-status-chip online">ONLINE</span>
-                  </div>
-
-                  <div className="sys-storage-kpis">
-                    <div className="sys-queue-kpi">
-                      <span className="label-caps">{st.recordsUnit}</span>
-                      <strong>{st.recordsCount.toLocaleString()}</strong>
-                    </div>
-                    <div className="sys-queue-kpi">
-                      <span className="label-caps">Volumen</span>
-                      <strong>{st.storageSizeMb} MB</strong>
-                    </div>
-                    <div className="sys-queue-kpi">
-                      <span className="label-caps">Operaciones</span>
-                      <strong>{st.iops} IOPS</strong>
-                    </div>
-                  </div>
-                </article>
-              ))}
-            </div>
-          </section>
-        </div>
-
-        {/* SECTION 4: LIVE DISTRIBUTED LOG STREAM (logs_queue) */}
+        {/* BOTTOM: LIVE DISTRIBUTED LOG STREAM (logs_queue :5673) */}
         <section className="sys-section sys-logs-section" aria-label="Stream de logs distribuidos">
           <div className="sys-section-head">
             <div className="sys-section-title">
               <Terminal size={15} strokeWidth={1.75} />
-              <span>5. Stream de Logs Distribuidos en Vivo (RabbitMQ · logs_queue :5673)</span>
+              <span>Trazabilidad de Eventos en Tránsito (RabbitMQ · logs_queue :5673 & camera_processing_queue :5672)</span>
             </div>
 
             <div className="sys-log-controls">
               <div className="segmented small" role="tablist" aria-label="Filtrar logs por servicio">
                 {(
-                  ['ALL', 'API-REST', 'AUTH-SERVICE', 'EDGE-PROC', 'CV-MODULE', 'RABBITMQ', 'MONITORING'] as LogSource[]
+                  ['ALL', 'API-REST', 'AUTH-SERVICE', 'EDGE-PROC', 'CV-MODULE', 'RABBITMQ'] as LogSource[]
                 ).map((source) => (
                   <button
                     key={source}
@@ -936,16 +1206,6 @@ export const SystemBackendView: React.FC<SystemBackendViewProps> = ({
               <button
                 type="button"
                 className="sim-btn"
-                onClick={() => setIsLogStreamPaused((p) => !p)}
-                title={isLogStreamPaused ? 'Reanudar stream' : 'Pausar stream'}
-              >
-                {isLogStreamPaused ? <Play size={13} strokeWidth={1.75} /> : <Pause size={13} strokeWidth={1.75} />}
-                <span>{isLogStreamPaused ? 'Reanudar' : 'Pausar'}</span>
-              </button>
-
-              <button
-                type="button"
-                className="sim-btn"
                 onClick={() => setLogs([])}
                 title="Limpiar consola"
               >
@@ -957,7 +1217,7 @@ export const SystemBackendView: React.FC<SystemBackendViewProps> = ({
           <div className="sys-terminal" data-testid="sys-log-terminal">
             {filteredLogs.length === 0 ? (
               <div className="sys-terminal-empty">
-                SIN EVENTOS EN COLA PARA EL FILTRO SELECCIONADO ({logFilter})
+                SIN EVENTOS PARA EL FILTRO SELECCIONADO ({logFilter})
               </div>
             ) : (
               filteredLogs.map((entry) => (
