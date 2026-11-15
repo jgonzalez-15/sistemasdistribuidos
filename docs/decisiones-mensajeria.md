@@ -132,6 +132,49 @@ Cada decisión registra:
   - Los avisos internos del shipper (`log_shipper_retry`) salen solo por stdout.
 - **Alternativa descartada:** publicar en el mismo hilo, que es más simple pero acopla el procesamiento a la disponibilidad de `logs-queue`. También se descartó un agente externo que lea stdout (Fluent Bit/Filebeat): no hay que tocar el código, pero suma otro contenedor y su configuración.
 
+## D16. CV simulado: qué valida, qué no, y el camino a CV real
+- **Por qué:** la docente pidió no implementar Computer Vision real y poner el esfuerzo en lo distribuido. Los frames son matrices NumPy con rectángulos (vehículos) y ruido. El conteo es un umbral de brillo más componentes conexas (`scipy.ndimage.label`), detrás de la interfaz `Detector` (Strategy).
+- **Fuente:** comentario de la docente sobre la preentrega. Strategy y `scipy` son **[FUERA DE CLASE]**.
+- **Qué queda validado** (no depende del contenido del frame): reparto entre workers, ACK después de guardar, DLQ, idempotencia, escalado, *claim check* y logs.
+- **Trade-off aceptado: el detector simulado no funcionaría con video real.**
+  - **Imagen:** sombras, faroles, autos oscuros, lluvia y autos superpuestos lo hacen contar mal.
+  - **Preprocesamiento:** el descarte por diferencia de frames y la reducción de resolución están calibrados para la simulación. Con luz cambiante o una cámara que vibra hay que recalibrarlos, y un auto lejano puede perderse al reducir.
+  - **Qué se mide:** `vehicle_count` es "autos visibles", un indicador razonable de congestión. Contar autos *que pasan* requiere seguirlos entre frames (*tracking*).
+  - **Costo:** hoy son ~4 ms por clip. Un modelo real tarda unos 50 a 200 ms por frame en CPU, que es lo que representa `PROCESSING_DELAY_MS`.
+- **Camino a CV real (trabajo futuro):**
+  1. El edge lee video real (OpenCV) y comprime los clips. Pasan a color: `shape` cambia a `[alto, ancho, 3]`, un **cambio de contrato** (D2).
+  2. Un `DetectorOpenCV` (sustracción de fondo MOG2 + contornos, sin entrenamiento) o un `DetectorYOLO` (modelo preentrenado) implementa `Detector.contar()`, y el worker no cambia.
+  3. Se valida con videos de tránsito etiquetados: error absoluto medio del conteo contra la cantidad real.
+  4. Se calibra el preprocesamiento y se mide cuántos workers (o GPU) hacen falta por cámara.
+- **Cómo afecta:** el costo extra de un modelo real se absorbe escalando workers (`--scale`, D5). Un frame que rompe el modelo va a la DLQ (D6) y no tumba el sistema.
+- **Alternativas descartadas por ahora:**
+  - **YOLO preentrenado:** instala PyTorch, con imágenes de ~1,5 GB y builds lentos el día de la entrega; licencia AGPL; va contra el comentario docente.
+  - **OpenCV clásico:** queda como extra opcional si sobra tiempo después de las demos, detrás de `DETECTOR=simulado|opencv` con `simulado` por defecto, para que las demos no dependan de él.
+
+## D17. Demos con scripts reproducibles y resultados medidos
+- **Por qué:** las demos (escalado, worker caído, idempotencia, DLQ y carga) tienen que poder repetirse en cualquier máquina del equipo y en la defensa, con el mismo resultado. Cada script solo usa Docker (`docker compose`, `rabbitmqctl`/`rabbitmqadmin` y `psql` dentro de los contenedores) y termina restaurando la configuración normal.
+- **Fuente:**
+  - Tema 1.2 p.7 (transparencia de fallo y de replicación) y p.21 (replicación para balancear la carga).
+  - Tema 4.4 p.8–9 (re-encolado de mensajes sin ACK, competing consumers, DLQ).
+  - Tema 2.0 p.15 (IX) y p.17 (X, paridad entre entornos).
+- **Resultados** (evidencias 08 a 12):
+  - **Escalado:** con 1 worker la cola crece ~2,5 mensajes/s; con 3 baja a 0 en ~55 s y el reparto queda parejo (173/170/170).
+  - **Worker caído:** el mensaje en vuelo lo termina otra réplica (`redelivered: true`), sin pérdidas ni duplicados (36 = 36).
+  - **Idempotencia:** 3 entregas del mismo clip dan 1 sola fila.
+  - **DLQ:** el clip llega a `camera_dlq` con `x-death`.
+  - **Carga:** 300 cámaras = 60 clips/s con 1 worker, sin cola ni `edge_lagging`; ~0,6 GB/min en MinIO.
+- **Trade-off aceptado:**
+  - Las demos de escalado y de worker caído usan `PROCESSING_DELAY_MS` (D13): sin eso, el CV simulado es tan rápido que no se vería el efecto.
+  - Las demos con muchas cámaras escriben filas de cámaras e intersecciones que no existen en las tablas de Joaco G. El README trae el `DELETE` para limpiarlas.
+  - `docker kill` cuenta como parada manual, así que `restart: unless-stopped` no relanza la víctima. Es buscado: se ve claro que otra réplica toma el trabajo.
+  - Los scripts son bash: en Windows necesitan WSL o Git Bash.
+- **Cómo afecta:**
+  - Joaco G y Hernán corren las demos con la sección 4 del README.
+  - Hernán saca las capturas de escalado y de fallo.
+  - Iago usa las evidencias 08 a 12.
+  - **Hallazgo de la carga:** el cuello de botella real va a ser el modelo de CV (D16), no la mensajería. Y la retención en MinIO deja de ser opcional en producción (D10).
+- **Alternativa descartada:** demos manuales desde el panel de RabbitMQ. Son más visuales, pero no son reproducibles ni dejan evidencia en texto. Las capturas del panel se suman como complemento.
+
 ## D13. `PROCESSING_DELAY_MS`: demora artificial opcional en el worker
 - **Por qué:** el CV simulado es tan rápido (milisegundos) que un solo worker vacía la cola y en la demo no se ve la diferencia entre 1 y 3 workers. Con una demora de, por ejemplo, 500 ms, la cola crece con 1 worker y baja con 3.
 - **Fuente:** decisión para la demo (Tema 1.2 p.21, escalar para repartir la carga).

@@ -242,6 +242,9 @@ class Worker(threading.Thread):
                   vehicle_count=vehicle_count,
                   camera_id=msg["camera_id"], intersection_id=msg["intersection_id"],
                   processed_by=self.processed_by, duplicate=not insertado,
+                  # redelivered=True: RabbitMQ ya lo había entregado antes (por ejemplo, a un worker
+                  # que se cayó sin hacer ACK) y lo re-encoló para otro consumidor.
+                  redelivered=bool(method.redelivered),
                   message="clip ya procesado antes (duplicado, no se insertó)" if not insertado
                   else f"clip procesado: {vehicle_count} vehículos")
 

@@ -150,3 +150,22 @@ Eventos: `clip_published`, `clip_processed`, `clip_failed`, `clip_dead_lettered`
   docker build -t <service-name> .
   docker run --env-file .env -p <port>:<port> <service-name>
   ```
+
+---
+
+## 4. Demos (mensajería y procesamiento)
+
+Scripts en `scripts/`. Solo necesitan Docker y bash (en Windows: WSL o Git Bash). Se corren desde cualquier carpeta, con el sistema levantado (`docker compose up -d`). Cada script termina **restaurando la configuración normal** (6 cámaras, 1 worker, sin demora). Si el puerto 8001 está ocupado, anteponé `EDGE_PROCESSOR_PORT=18001`.
+
+| Script | Qué demuestra | Duración |
+| :--- | :--- | :--- |
+| `./scripts/demo_escalado.sh` | **Escalabilidad.** 30 cámaras y 300 ms por clip: con 1 worker la cola crece; con `--scale cv-module=3` baja a 0 y los clips se reparten entre las réplicas (`processed_by`). | ~3 min |
+| `./scripts/demo_worker_caido.sh` | **Tolerancia a fallos.** `docker kill` de un worker con un clip a medio procesar: RabbitMQ re-encola el mensaje sin ACK y lo procesa la otra réplica (`redelivered: true`). Publicados = filas en `results`. | ~1 min |
+| `./scripts/demo_idempotencia.sh` | **Consistencia.** Reenvía dos veces un clip ya procesado: el worker loguea `duplicate: true` y `results` conserva 1 sola fila. | ~10 s |
+| `./scripts/demo_dlq.sh` | **DLQ.** Un mensaje cuyo clip no existe en MinIO falla en `download` y termina en `camera_dlq` con el header `x-death`, sin trabar la cola. | ~10 s |
+| `./scripts/prueba_carga.sh` | **Capacidad.** 300 cámaras (~60 clips/s): mide clips/s, profundidad de la cola y `edge_lagging`. Si la cola crece, escala a 3 workers. | ~2,5 min |
+
+Las demos de escalado, worker caído y carga escriben en `results` filas de cámaras de prueba (`cam-7` en adelante). Para borrarlas:
+```bash
+docker compose exec results-db psql -U postgres -d results_db -c "DELETE FROM results WHERE camera_id NOT IN ('cam-1','cam-2','cam-3','cam-4','cam-5','cam-6');"
+```
