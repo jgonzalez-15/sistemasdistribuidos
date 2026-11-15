@@ -14,6 +14,9 @@ AUTH_DB_NAME = os.getenv("AUTH_DB_NAME", "auth_db")
 AUTH_DB_USER = os.getenv("AUTH_DB_USER", "postgres")
 AUTH_DB_PASS = os.getenv("AUTH_DB_PASS", "postgres")
 
+# Token / Session Configuration
+TOKEN_EXPIRATION_MINUTES = int(os.getenv("TOKEN_EXPIRATION_MINUTES", "30"))
+
 # Logs Queue (RabbitMQ Instance 2)
 LOGS_QUEUE_HOST = os.getenv("LOGS_QUEUE_HOST", "logs-queue")
 LOGS_QUEUE_PORT = int(os.getenv("LOGS_QUEUE_PORT", "5672"))
