@@ -23,8 +23,8 @@ Every component in this repository is isolated in its own container and configur
 - **Camera Processing Queue (`camera-queue` - RabbitMQ Container 1)**:
   - **Ports**: Host `5672` $\rightarrow$ Container `5672` (AMQP), Host `15672` $\rightarrow$ Container `15672` (Management UI — `guest` / `guest`)
   - **Pre-configured Queue** (in `infrastructure/camera-queue/definitions.json`): `camera_processing_queue`
-  - **Dead-letter queue:** `camera_processing_queue` tiene `x-dead-letter-exchange: dlx`. El exchange `dlx` (fanout) entrega a la cola `camera_dlq`. Un mensaje rechazado con `basic_nack(requeue=False)`, o que vence por TTL, termina en `camera_dlq` con el header `x-death` (motivo y cola de origen).
-  - **Si cambiás `definitions.json`**, recreá el broker sin su volumen; si no, queda la topología vieja: `docker compose rm -sfv camera-queue && docker compose up -d camera-queue`. Si al arrancar falla con `.erlang.cookie: eacces`, repetí el mismo comando.
+  - **Dead-letter queue:** `camera_processing_queue` tiene `x-dead-letter-exchange: dlx`. El exchange `dlx` (fanout) entrega a la cola `camera_dlq`. Un mensaje rechazado con `basic_nack(requeue=False)` termina en `camera_dlq` con el header `x-death` (motivo y cola de origen). Si en el futuro se configura un TTL, los mensajes vencidos también terminan en esa cola.
+  - **Al cambiar `definitions.json`** hay que recrear el broker sin su volumen; si no, se conserva la topología vieja. Esto elimina los mensajes encolados: `docker compose rm -sfv camera-queue && docker compose up -d camera-queue`. Si al arrancar falla con `.erlang.cookie: eacces`, se repite el mismo comando.
   - Los servicios **no declaran** estas colas con argumentos propios (usan `queue_declare(passive=True)`): la topología vive solo en `definitions.json`.
 - **Logs Queue (`logs-queue` - RabbitMQ Container 2)**:
   - **Ports**: Host `5673` $\rightarrow$ Container `5672` (AMQP), Host `15673` $\rightarrow$ Container `15672` (Management UI — `guest` / `guest`)
@@ -36,7 +36,7 @@ Every component in this repository is isolated in its own container and configur
 - **Results Database (`results-db` - PostgreSQL 16)**:
   - **Ports**: Host `5434` $\rightarrow$ Container `5432`
   - **Database / Credentials**: `results_db` (`postgres` / `postgres`)
-  - **Init Script**: `infrastructure/results-db/init.sql` (skeleton ready for your schema)
+  - **Init Script**: `infrastructure/results-db/init.sql`. Contiene la tabla `results` (escrita por `cv-module`: un resultado por clip, con `clip_id` único) y su índice `(intersection_id, ts DESC)`. Las tablas `intersections`, `cameras` y `metrics` las define el responsable de la base. El script solo se ejecuta con el volumen `results_db_data` vacío; para aplicarlo sobre una base existente: `docker compose exec -T results-db psql -U postgres -d results_db < infrastructure/results-db/init.sql`.
 - **Clips Database (`clips-db` - MinIO S3 Object Storage)**:
   - **Ports**: `9000` (S3 API), `9001` (Web Console — default credentials: `minioadmin` / `minioadmin`)
   - Automatically initializes the `clips` bucket directory on startup.
@@ -53,8 +53,8 @@ El `edge-processor` publica **un mensaje por clip** y el `cv-module` lo consume.
 | :--- | :--- | :--- |
 | `clip_id` | string (UUID v4) | Identificador único del clip. Es la **clave de idempotencia**: la entrega es *at-least-once*, así que el mismo `clip_id` puede llegar más de una vez y el resultado se guarda una sola vez. |
 | `trace_id` | string | Igual a `clip_id`. Sirve para seguir el clip en los logs de todos los servicios. |
-| `camera_id` | string | ID de la cámara (ej. `cam-1`). Tiene que existir en la tabla `cameras`. |
-| `intersection_id` | string | ID de la intersección (ej. `int-1`). Tiene que existir en la tabla `intersections`. |
+| `camera_id` | string | ID de la cámara (ej. `cam-1`). Debe coincidir con los IDs cargados en la tabla `cameras` (el worker no lo valida). |
+| `intersection_id` | string | ID de la intersección (ej. `int-1`). Debe coincidir con los IDs cargados en la tabla `intersections`. |
 | `timestamp` | string (ISO 8601, UTC, sufijo `Z`) | Momento de captura del clip, no de publicación. |
 | `object_key` | string | Clave del clip en el bucket `CLIPS_BUCKET_NAME`, con formato `{camera_id}/{clip_id}.npy`. El nombre del bucket sale de la configuración, no del mensaje. |
 | `frames` | int | Cantidad de frames del clip, después de descartar los que no cambiaron. |
@@ -96,7 +96,7 @@ Ejemplo:
 | Variable | Default | Para qué |
 | :--- | :--- | :--- |
 | `CAMERA_IDS` | `cam-1:int-1,…,cam-6:int-3` | Cámaras de esta instancia (`camara:interseccion`). Una instancia por zona. |
-| `CAMERA_RANGE` | vacío | Por ejemplo `101-300`: genera `cam-101…cam-300` con 2 cámaras por intersección (`int-((N+1)/2)`). Si tiene valor, reemplaza a `CAMERA_IDS`. |
+| `CAMERA_RANGE` | vacío | Por ejemplo `101-300`: genera `cam-101…cam-300` con 2 cámaras por intersección: `cam-N` → `int-((N+1)//2)` (división entera; `cam-1`,`cam-2` → `int-1`). Si tiene valor, reemplaza a `CAMERA_IDS`. |
 | `FRAME_INTERVAL` | `5` | Segundos entre clips de una misma cámara. |
 | `EDGE_THREADS` | `4` | Hilos por instancia; cada uno tiene su conexión y su grupo de cámaras. |
 | `FRAMES_PER_CLIP`, `FRAME_HEIGHT`, `FRAME_WIDTH`, `DOWNSCALE`, `DIFF_THRESHOLD`, `PUBLISH_MAX_RETRIES` | `10`, `240`, `320`, `2`, `2.0`, `4` | Simulación y preprocesamiento. |
@@ -155,7 +155,7 @@ Eventos: `clip_published`, `clip_processed`, `clip_failed`, `clip_dead_lettered`
 
 ## 4. Demos (mensajería y procesamiento)
 
-Scripts en `scripts/`. Solo necesitan Docker y bash (en Windows: WSL o Git Bash). Se corren desde cualquier carpeta, con el sistema levantado (`docker compose up -d`). Cada script termina **restaurando la configuración normal** (6 cámaras, 1 worker, sin demora). Si el puerto 8001 está ocupado, anteponé `EDGE_PROCESSOR_PORT=18001`.
+Scripts en `scripts/`. Solo necesitan Docker y bash (en Windows: WSL o Git Bash). Se corren desde cualquier carpeta, con el sistema levantado (`docker compose up -d`). Cada script termina **restaurando la configuración normal** (6 cámaras, 1 worker, sin demora). Si el puerto 8001 está ocupado, se antepone `EDGE_PROCESSOR_PORT=18001` al comando.
 
 | Script | Qué demuestra | Duración |
 | :--- | :--- | :--- |
@@ -169,3 +169,14 @@ Las demos de escalado, worker caído y carga escriben en `results` filas de cám
 ```bash
 docker compose exec results-db psql -U postgres -d results_db -c "DELETE FROM results WHERE camera_id NOT IN ('cam-1','cam-2','cam-3','cam-4','cam-5','cam-6');"
 ```
+
+---
+
+## 5. Documentación de mensajería y procesamiento
+
+| Documento | Contenido |
+| :--- | :--- |
+| `docs/decisiones-mensajeria.md` | Registro de decisiones D1–D17: motivo, fuente en el material del curso, trade-off aceptado, impacto en otros componentes y alternativa descartada. |
+| Sección 2.1 de este README | Contrato del mensaje en `camera_processing_queue`. |
+| Sección 2.2 de este README | Configuración del edge y del worker, y eventos de log. |
+| Sección 4 de este README | Demos reproducibles (`scripts/`). |
