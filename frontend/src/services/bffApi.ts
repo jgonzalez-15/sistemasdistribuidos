@@ -42,30 +42,34 @@ function generateMockJwt(username: string, role: UserRole): string {
   return `${header}.${payload}.${signature}`;
 }
 
+function normalizeBackendRole(backendRole?: string, fallbackRole?: UserRole): UserRole {
+  const normalized = (backendRole || '').trim().toLowerCase();
+  if (normalized === 'admin' || normalized === 'administrador') {
+    return 'Administrador';
+  }
+  if (normalized === 'user' || normalized === 'operador') {
+    return 'Operador';
+  }
+  return fallbackRole || 'Operador';
+}
+
 /**
- * 1. Servicio de Autenticación (POST /auth/login en BFF / Auth Service)
- * Intenta conectar con el endpoint real si está disponible, o resuelve mediante
- * la simulación controlada del MVP validando credenciales de Administrador u Operador.
+ * 1. Servicio de Autenticación (POST /login en API REST -> auth-service)
+ * Valida credenciales reales contra auth-service/auth-db. Si el backend responde 401/403/422,
+ * propaga el error real. Solo cae al modo mock si el backend no está accesible.
  */
 export async function loginWithBff(credentials: LoginCredentials): Promise<UserSession> {
   const { username, password, role } = credentials;
-
-  // Simulate network latency to show loading states clearly
-  await new Promise((resolve) => setTimeout(resolve, 650));
-
   const normalizedUser = username.trim().toLowerCase();
 
-  // Simulated validation rule: reject invalid credentials or explicit "error" test cases
-  if (!normalizedUser || password.length < 4 || password === 'invalid' || password === 'error') {
-    throw new Error(
-      'Credenciales inválidas: El usuario o la contraseña no coinciden con los registros del servicio de autenticación (Auth-DB).'
-    );
+  if (!normalizedUser || !password) {
+    throw new Error('Debe ingresar usuario y contraseña.');
   }
 
-  // Optional attempt against real BFF endpoint (/login from api-rest & /auth/login fallback)
+  let backendReachable = false;
   try {
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 800);
+    const timeout = setTimeout(() => controller.abort(), 1500);
 
     const response = await fetch(`${API_REST_URL}/login`, {
       method: 'POST',
@@ -79,22 +83,38 @@ export async function loginWithBff(credentials: LoginCredentials): Promise<UserS
       signal: controller.signal,
     });
     clearTimeout(timeout);
+    backendReachable = true;
 
-    if (response.ok) {
-      const data = await response.json().catch(() => null);
-      if (data && data.access_token) {
-        const session: UserSession = {
-          username: data.username || data.user || username.trim(),
-          role: data.role || role || 'Operador',
-          token: data.access_token,
-          issuedAt: new Date().toLocaleTimeString(),
-        };
-        saveSession(session);
-        return session;
-      }
+    const data = await response.json().catch(() => null);
+    if (response.ok && data && (data.access_token || data.token)) {
+      const session: UserSession = {
+        username: data.username || data.user || username.trim(),
+        role: normalizeBackendRole(data.role, role),
+        token: data.access_token || data.token,
+        issuedAt: new Date().toLocaleTimeString(),
+      };
+      saveSession(session);
+      return session;
     }
-  } catch {
-    // Fallback to simulated BFF JWT response for immediate MVP evaluation
+
+    if (!response.ok) {
+      throw new Error(
+        (data && data.detail) ||
+          'Credenciales inválidas: El usuario o la contraseña no coinciden con los registros de Auth-DB.'
+      );
+    }
+  } catch (err) {
+    if (backendReachable) {
+      throw err;
+    }
+    // Fallback to simulated BFF JWT response only when api-rest is unreachable
+  }
+
+  await new Promise((resolve) => setTimeout(resolve, 400));
+  if (password.length < 4 || password === 'invalid' || password === 'error') {
+    throw new Error(
+      'Credenciales inválidas (modo offline): verifique usuario y contraseña.'
+    );
   }
 
   const assignedRole: UserRole =
@@ -131,22 +151,49 @@ export function clearSession(): void {
   localStorage.removeItem(STORAGE_SESSION_KEY);
 }
 
+export async function logoutFromBff(): Promise<void> {
+  const token = localStorage.getItem(STORAGE_TOKEN_KEY);
+  clearSession();
+  if (!token) return;
+
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 800);
+    await fetch(`${API_REST_URL}/logout`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({ token }),
+      signal: controller.signal,
+    });
+    clearTimeout(timeout);
+  } catch {
+    // Session already cleared locally if BFF is offline
+  }
+}
+
 /**
  * 2. Recuperación de Estado Actual de las Vías (GET /api/intersections en BFF FastAPI)
  * Envía el JWT en la cabecera Authorization: Bearer <token>.
  */
-export async function fetchIntersectionsFromBff(): Promise<{
+export async function fetchIntersectionsFromBff(options?: {
+  forceLive?: boolean;
+}): Promise<{
   data: IntersectionSummary[];
   source: 'bff-live' | 'bff-mock-fallback';
 }> {
   const token = localStorage.getItem(STORAGE_TOKEN_KEY);
 
-  await new Promise((resolve) => setTimeout(resolve, 380));
+  if (options?.forceLive) {
+    hasLocalSimulationUpdates = false;
+  }
 
   if (!hasLocalSimulationUpdates) {
     try {
       const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 900);
+      const timeout = setTimeout(() => controller.abort(), 1500);
 
       const response = await fetch(`${API_REST_URL}/api/intersections`, {
         method: 'GET',
@@ -161,7 +208,8 @@ export async function fetchIntersectionsFromBff(): Promise<{
       if (response.ok) {
         const realData = await response.json();
         if (Array.isArray(realData) && realData.length > 0) {
-          return { data: [...currentIntersectionsState], source: 'bff-live' };
+          currentIntersectionsState = realData;
+          return { data: realData, source: 'bff-live' };
         }
       }
     } catch {
@@ -180,18 +228,16 @@ export async function fetchIntersectionsFromBff(): Promise<{
  */
 export async function fetchIntersectionAnalyticsFromBff(
   intersectionId: string,
-  options?: { fastRefresh?: boolean }
+  _options?: { fastRefresh?: boolean }
 ): Promise<IntersectionAnalyticsDetail> {
   const token = localStorage.getItem(STORAGE_TOKEN_KEY);
 
-  if (!options?.fastRefresh) {
-    await new Promise((resolve) => setTimeout(resolve, 350));
-
+  if (!hasLocalSimulationUpdates) {
     try {
       const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 900);
+      const timeout = setTimeout(() => controller.abort(), 1500);
 
-      await fetch(
+      const response = await fetch(
         `${API_REST_URL}/api/intersections/${encodeURIComponent(intersectionId)}/history`,
         {
           method: 'GET',
@@ -203,8 +249,14 @@ export async function fetchIntersectionAnalyticsFromBff(
         }
       );
       clearTimeout(timeout);
+      if (response.ok) {
+        const realDetail = await response.json();
+        if (realDetail && realDetail.intersection && Array.isArray(realDetail.timeSeries)) {
+          return realDetail as IntersectionAnalyticsDetail;
+        }
+      }
     } catch {
-      // Fallback to structured time-series mock with persistent live batches
+      // Fallback to structured time-series mock when backend is offline
     }
   }
 
@@ -215,6 +267,37 @@ export async function fetchIntersectionAnalyticsFromBff(
   const series = currentTimeSeriesById[found.id];
 
   return buildMockAnalyticsDetail(found, series);
+}
+
+/**
+ * 4. Salud agregada de microservicios (GET /api/system/health - solo Administrador)
+ */
+export async function fetchSystemHealthFromBff(): Promise<Record<string, any> | null> {
+  const token = localStorage.getItem(STORAGE_TOKEN_KEY);
+  if (!token) return null;
+
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 2500);
+
+    const response = await fetch(`${API_REST_URL}/api/system/health`, {
+      method: 'GET',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      signal: controller.signal,
+    });
+    clearTimeout(timeout);
+
+    if (response.ok) {
+      const data = await response.json();
+      return data?.services || null;
+    }
+  } catch {
+    // Backend unavailable
+  }
+  return null;
 }
 
 /**

@@ -192,7 +192,7 @@ export const LoginView: React.FC<LoginViewProps> = ({ onLoginSuccess }) => {
                 role="tab"
                 aria-selected={selectedRole === 'Operador'}
                 className={`segmented-item ${selectedRole === 'Operador' ? 'active' : ''}`}
-                onClick={() => applyQuickRole('Operador', 'operador.montevideo', 'urbano2026')}
+                onClick={() => applyQuickRole('Operador', 'user', 'user123')}
               >
                 Operador Vial
               </button>
@@ -201,7 +201,7 @@ export const LoginView: React.FC<LoginViewProps> = ({ onLoginSuccess }) => {
                 role="tab"
                 aria-selected={selectedRole === 'Administrador'}
                 className={`segmented-item ${selectedRole === 'Administrador' ? 'active' : ''}`}
-                onClick={() => applyQuickRole('Administrador', 'admin.central', 'admin2026')}
+                onClick={() => applyQuickRole('Administrador', 'admin', 'admin123')}
               >
                 Administrador
               </button>

@@ -17,6 +17,7 @@ import {
   MONITORING_PIPELINE_URL,
   VISUALIZATION_BACKEND_URL,
 } from '../config';
+import { fetchSystemHealthFromBff } from '../services/bffApi';
 
 interface SystemBackendViewProps {
   isFaultTolerantDemoMode: boolean;
@@ -541,6 +542,30 @@ export const SystemBackendView: React.FC<SystemBackendViewProps> = ({
   useEffect(() => {
     return () => clearScheduledTimers();
   }, []);
+
+  // Poll real /api/system/health from api-rest (Admin-only)
+  useEffect(() => {
+    let mounted = true;
+    const pollHealth = async () => {
+      const services = await fetchSystemHealthFromBff();
+      if (!mounted || !services) return;
+      const summary = Object.entries(services)
+        .map(([name, info]: [string, any]) => `${name}:${info?.status || 'unknown'}`)
+        .join(' · ');
+      appendLog(
+        'api-rest',
+        'INFO',
+        `GET /api/system/health -> ${summary}`,
+        'logs_queue'
+      );
+    };
+    void pollHealth();
+    const timer = window.setInterval(() => void pollHealth(), 10000);
+    return () => {
+      mounted = false;
+      window.clearInterval(timer);
+    };
+  }, [appendLog]);
 
   // Delta-time animation loop so toggling 5% Slow-Mo immediately slows down packets mid-flight
   useEffect(() => {

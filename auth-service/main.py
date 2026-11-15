@@ -1,6 +1,7 @@
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
+from typing import Optional
 from datetime import datetime, timedelta
 import psycopg2
 from psycopg2.extras import RealDictCursor
@@ -20,8 +21,10 @@ app.add_middleware(
 
 
 class LoginBody(BaseModel):
-    user: str
+    user: Optional[str] = None
+    username: Optional[str] = None
     password: str
+    role: Optional[str] = None
 
 
 class TokenBody(BaseModel):
@@ -90,12 +93,16 @@ def on_startup():
 
 @app.post("/login")
 def login(loginBody: LoginBody):
+    login_user = (loginBody.user or loginBody.username or "").strip()
+    if not login_user:
+        raise HTTPException(status_code=422, detail="Missing 'user' or 'username'")
+
     try:
         conn = get_db_connection()
         with conn.cursor() as cur:
             cur.execute(
                 "SELECT username, password, role FROM users WHERE username = %s AND password = %s",
-                (loginBody.user, loginBody.password)
+                (login_user, loginBody.password)
             )
             user_record = cur.fetchone()
 
@@ -122,9 +129,11 @@ def login(loginBody: LoginBody):
         return {
             "status": "ok",
             "user": user_record["username"],
+            "username": user_record["username"],
             "role": user_record["role"],
             "session_id": session_id,
             "token": token,
+            "access_token": token,
             "expires_at": expires_at.isoformat()
         }
     except HTTPException:
@@ -238,6 +247,11 @@ def token_state(body: TokenStateBody):
 @app.post("/token/refresh")
 def refresh_token(tokenBody: TokenBody):
     return token_state(TokenStateBody(token=tokenBody.token, refresh=True))
+
+
+@app.get("/")
+def root():
+    return {"service": config.SERVICE_NAME, "status": "ok", "port": config.SERVICE_PORT}
 
 
 @app.get("/health")
