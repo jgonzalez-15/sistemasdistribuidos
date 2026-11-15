@@ -1,9 +1,9 @@
 import React from 'react';
-import { LogOut } from 'lucide-react';
+import { LogOut, Server } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { API_REST_URL } from '../config';
 
-export type ViewMode = 'map' | 'split';
+export type ViewMode = 'map' | 'split' | 'system';
 
 interface HeaderProps {
   viewMode: ViewMode;
@@ -31,6 +31,7 @@ export const Header: React.FC<HeaderProps> = ({
 }) => {
   const { session, logout } = useAuth();
   const initials = session?.username.slice(0, 2).toUpperCase() ?? '··';
+  const isAdmin = session?.role === 'Administrador';
 
   const clusterTooltip = isFaultTolerantDemoMode
     ? `Workers CV en pausa · RabbitMQ reteniendo camera_processing_queue · BFF FastAPI (${API_REST_URL}) sirviendo último estado en PostgreSQL. Clic para restaurar.`
@@ -83,6 +84,20 @@ export const Header: React.FC<HeaderProps> = ({
           >
             Vista Dividida
           </button>
+          {isAdmin && (
+            <button
+              type="button"
+              role="tab"
+              id="tab-system-backend"
+              aria-selected={viewMode === 'system'}
+              className={`segmented-item sys-tab ${viewMode === 'system' ? 'active' : ''}`}
+              onClick={() => onChangeViewMode('system')}
+              title="Vista exclusiva de Administrador: Topología, Colas RabbitMQ, Bases de Datos y Logs del Sistema"
+            >
+              <Server size={13} strokeWidth={1.75} />
+              <span>Sistema</span>
+            </button>
+          )}
         </div>
 
         <span className="cmd-divider" />
@@ -91,7 +106,7 @@ export const Header: React.FC<HeaderProps> = ({
           <div className="user-pill" title={`JWT emitido a las ${session.issuedAt}`}>
             <span className="user-avatar">{initials}</span>
             <span className="user-name">{session.username}</span>
-            <span className="user-role">{session.role}</span>
+            <span className={`user-role ${isAdmin ? 'is-admin' : ''}`}>{session.role}</span>
           </div>
         )}
 

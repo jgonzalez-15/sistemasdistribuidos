@@ -1716,6 +1716,592 @@ code {
 .endpoint .status-dot.offline { background: var(--critical); }
 
 /* ==========================================================================
+   SYSTEM BACKEND VIEW (ADMIN ONLY)
+   ========================================================================== */
+.segmented-item.sys-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.segmented-item.sys-tab.active {
+  color: var(--accent);
+}
+.user-role.is-admin {
+  color: var(--accent);
+}
+
+.sys-workspace {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  background: var(--canvas);
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.12) transparent;
+}
+
+.sys-subheader {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 16px;
+  padding: 14px 24px;
+  background: rgba(9, 9, 11, 0.92);
+  backdrop-filter: var(--blur);
+  -webkit-backdrop-filter: var(--blur);
+  border-bottom: 1px solid var(--border);
+}
+
+.sys-subheader-left {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.sys-admin-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 7px;
+  border-radius: var(--radius-sm);
+  background: rgba(59, 130, 246, 0.14);
+  border: 1px solid rgba(59, 130, 246, 0.38);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  color: var(--accent);
+}
+
+.sys-title {
+  font-size: 16px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--text-primary);
+}
+
+.sys-subtitle {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-tertiary);
+}
+.sys-subtitle code {
+  color: var(--text-secondary);
+}
+
+.sys-subheader-right {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.sys-summary-pills {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-right: 6px;
+}
+
+.sys-stat-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 10px;
+  background: var(--canvas-raised);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--text-tertiary);
+}
+.sys-stat-pill strong {
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
+.sys-content {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  padding: 20px 24px 32px;
+  max-width: 1600px;
+  width: 100%;
+  margin: 0 auto;
+}
+
+.sys-section {
+  background: var(--canvas-raised);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+}
+
+.sys-section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border);
+  background: rgba(20, 20, 23, 0.55);
+}
+
+.sys-section-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+.sys-section-title svg {
+  color: var(--text-secondary);
+}
+
+.sys-section-meta {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  color: var(--text-tertiary);
+}
+
+/* 1. Pipeline flow diagram */
+.sys-pipeline-flow {
+  display: flex;
+  align-items: stretch;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 16px;
+  overflow-x: auto;
+}
+
+.sys-flow-stage {
+  flex: 1 1 200px;
+  min-width: 190px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  background: var(--canvas);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+}
+
+.sys-stage-label {
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  color: var(--text-tertiary);
+}
+
+.sys-flow-node {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 9px 10px;
+  background: var(--surface-elevated);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+}
+.sys-flow-node.highlight {
+  border-color: rgba(59, 130, 246, 0.45);
+  box-shadow: inset 0 0 0 1px rgba(59, 130, 246, 0.15);
+}
+.sys-flow-node.queue {
+  border-style: dashed;
+}
+.sys-flow-node.queue.warning {
+  border-color: rgba(245, 158, 11, 0.55);
+  background: rgba(245, 158, 11, 0.06);
+}
+.sys-flow-node.degraded {
+  border-color: rgba(239, 68, 68, 0.55);
+  background: rgba(239, 68, 68, 0.06);
+}
+.sys-flow-node.storage {
+  background: rgba(255, 255, 255, 0.015);
+  border-color: var(--border);
+}
+
+.sys-flow-node-top {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+.sys-flow-node-top svg {
+  color: var(--text-secondary);
+}
+.sys-port {
+  margin-left: auto;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 500;
+  color: var(--text-tertiary);
+}
+
+.sys-flow-node-desc {
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+.sys-flow-node-desc code {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--text-primary);
+}
+
+.sys-flow-badge {
+  margin-top: 2px;
+  display: inline-flex;
+  align-self: flex-start;
+  padding: 2px 6px;
+  background: var(--canvas);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text-secondary);
+}
+
+.sys-flow-subrow {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+.sys-flow-mini {
+  padding: 5px 8px;
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text-secondary);
+}
+
+.sys-flow-arrow {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  padding: 0 2px;
+  color: var(--text-tertiary);
+  flex-shrink: 0;
+}
+.sys-flow-arrow.paused {
+  color: var(--critical);
+}
+.sys-flow-protocol {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: 0.05em;
+  white-space: nowrap;
+}
+
+/* 2. Microservices Grid */
+.sys-services-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 1px;
+  background: var(--border);
+}
+
+.sys-service-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 16px;
+  background: var(--canvas-raised);
+}
+.sys-service-card.degraded {
+  background: rgba(239, 68, 68, 0.04);
+}
+
+.sys-card-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.sys-card-id {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.sys-port-tag {
+  padding: 1px 5px;
+  background: var(--surface-elevated);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  font-size: 10.5px;
+  font-weight: 500;
+  color: var(--text-secondary);
+}
+
+.sys-status-chip {
+  padding: 2px 7px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--surface-elevated);
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  color: var(--fluid);
+}
+.sys-status-chip.degraded {
+  color: var(--critical);
+  border-color: rgba(239, 68, 68, 0.4);
+  background: rgba(239, 68, 68, 0.1);
+}
+.sys-status-chip.retaining {
+  color: var(--moderate);
+  border-color: rgba(245, 158, 11, 0.4);
+  background: rgba(245, 158, 11, 0.1);
+}
+
+.sys-card-name {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.sys-card-role {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.sys-card-metrics {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+  margin-top: 4px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+}
+.sys-card-metrics > div {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.sys-card-metrics strong {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-primary);
+}
+
+.sys-card-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 4px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text-tertiary);
+}
+
+/* 3 & 4. Queues + Storage Two-Column */
+.sys-two-col {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 18px;
+}
+
+.sys-stack-list {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  background: var(--border);
+}
+
+.sys-queue-card,
+.sys-storage-card {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px;
+  background: var(--canvas-raised);
+}
+.sys-queue-card.retaining {
+  background: rgba(245, 158, 11, 0.04);
+}
+
+.sys-queue-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.sys-queue-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-family: var(--font-mono);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.sys-engine-badge {
+  padding: 1px 6px;
+  background: var(--surface-elevated);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  font-size: 10px;
+  font-weight: 500;
+  color: var(--text-secondary);
+}
+
+.sys-queue-sub {
+  margin-top: 3px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-tertiary);
+}
+.sys-queue-sub code {
+  color: var(--text-secondary);
+}
+
+.sys-queue-kpis {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 8px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+}
+
+.sys-storage-kpis {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+}
+
+.sys-queue-kpi {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.sys-queue-kpi strong {
+  font-family: var(--font-mono);
+  font-size: 14px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-primary);
+}
+
+/* 5. Distributed Log Terminal */
+.sys-log-controls {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.sys-terminal {
+  max-height: 270px;
+  overflow-y: auto;
+  padding: 10px 14px;
+  background: #070709;
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  line-height: 1.55;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.14) transparent;
+}
+
+.sys-log-line {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 3px 4px;
+  border-radius: 3px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.03);
+}
+.sys-log-line:hover {
+  background: rgba(255, 255, 255, 0.03);
+}
+.sys-log-line.level-warn {
+  background: rgba(245, 158, 11, 0.06);
+}
+
+.sys-log-time {
+  color: var(--text-tertiary);
+  flex-shrink: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+.sys-log-svc {
+  display: inline-block;
+  min-width: 96px;
+  padding: 0 6px;
+  border-radius: 3px;
+  font-size: 10px;
+  font-weight: 600;
+  text-align: center;
+  flex-shrink: 0;
+  background: var(--surface-elevated);
+  border: 1px solid var(--border);
+  color: var(--text-secondary);
+}
+.sys-log-svc.svc-api-rest { color: #60a5fa; border-color: rgba(59, 130, 246, 0.3); }
+.sys-log-svc.svc-auth-service { color: #c084fc; border-color: rgba(192, 132, 252, 0.3); }
+.sys-log-svc.svc-cv-module { color: #34d399; border-color: rgba(16, 185, 129, 0.3); }
+.sys-log-svc.svc-edge-proc { color: #38bdf8; border-color: rgba(56, 189, 248, 0.3); }
+.sys-log-svc.svc-rabbitmq { color: #fbbf24; border-color: rgba(245, 158, 11, 0.35); }
+.sys-log-svc.svc-monitoring { color: #a1a1aa; }
+
+.sys-log-queue {
+  font-size: 10px;
+  color: var(--text-tertiary);
+  flex-shrink: 0;
+}
+
+.sys-log-msg {
+  color: var(--text-primary);
+  word-break: break-word;
+}
+
+.sys-terminal-empty {
+  padding: 24px;
+  text-align: center;
+  color: var(--text-tertiary);
+}
+
+@media (max-width: 1180px) {
+  .sys-services-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+  .sys-two-col {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* ==========================================================================
    RESPONSIVE
    ========================================================================== */
 @media (max-width: 1100px) {

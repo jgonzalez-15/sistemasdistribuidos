@@ -3,18 +3,27 @@ import { AuthProvider, useAuth } from './context/AuthContext';
 import { Header, ViewMode } from './components/Header';
 import { LoginView } from './components/LoginView';
 import { DashboardView } from './views/DashboardView';
+import { SystemBackendView } from './views/SystemBackendView';
+import { UserRole } from './types/traffic';
 import './index.css';
 
 interface RouteState {
-  view: 'login' | 'dashboard' | 'detail';
+  view: 'login' | 'dashboard' | 'detail' | 'system';
   intersectionId?: string;
 }
 
-function parseHashRoute(isAuthenticated: boolean): RouteState {
+function parseHashRoute(isAuthenticated: boolean, role?: UserRole): RouteState {
   const hash = window.location.hash.replace(/^#/, '') || '/';
 
   if (!isAuthenticated) {
     return { view: 'login' };
+  }
+
+  if (hash.startsWith('/system')) {
+    if (role === 'Administrador') {
+      return { view: 'system' };
+    }
+    return { view: 'dashboard' };
   }
 
   const detailMatch = hash.match(/^\/intersections\/([a-zA-Z0-9_-]+)/);
@@ -26,14 +35,16 @@ function parseHashRoute(isAuthenticated: boolean): RouteState {
 }
 
 const AppRouter: React.FC = () => {
-  const { isAuthenticated } = useAuth();
-  const [route, setRoute] = useState<RouteState>(() => parseHashRoute(isAuthenticated));
+  const { isAuthenticated, session } = useAuth();
+  const [route, setRoute] = useState<RouteState>(() =>
+    parseHashRoute(isAuthenticated, session?.role)
+  );
   const [isFaultTolerantDemoMode, setIsFaultTolerantDemoMode] = useState<boolean>(false);
   const lastSelectedIdRef = useRef<string>('int-001');
 
   useEffect(() => {
     const syncFromHash = () => {
-      const next = parseHashRoute(isAuthenticated);
+      const next = parseHashRoute(isAuthenticated, session?.role);
       if (next.intersectionId) {
         lastSelectedIdRef.current = next.intersectionId;
       }
@@ -45,13 +56,19 @@ const AppRouter: React.FC = () => {
         (window.location.hash === '#/login' || !window.location.hash)
       ) {
         window.location.hash = '#/dashboard';
+      } else if (
+        isAuthenticated &&
+        window.location.hash.startsWith('#/system') &&
+        session?.role !== 'Administrador'
+      ) {
+        window.location.hash = '#/dashboard';
       }
     };
 
     syncFromHash();
     window.addEventListener('hashchange', syncFromHash);
     return () => window.removeEventListener('hashchange', syncFromHash);
-  }, [isAuthenticated]);
+  }, [isAuthenticated, session?.role]);
 
   const navigateToFullMap = () => {
     window.location.hash = '#/dashboard';
@@ -64,9 +81,17 @@ const AppRouter: React.FC = () => {
     setRoute({ view: 'detail', intersectionId });
   };
 
+  const navigateToSystemView = () => {
+    if (session?.role !== 'Administrador') return;
+    window.location.hash = '#/system';
+    setRoute({ view: 'system' });
+  };
+
   const handleChangeViewMode = (mode: ViewMode) => {
     if (mode === 'map') {
       navigateToFullMap();
+    } else if (mode === 'system') {
+      navigateToSystemView();
     } else {
       const targetId = route.intersectionId || lastSelectedIdRef.current || 'int-001';
       navigateToIntersectionDetail(targetId);
@@ -77,7 +102,8 @@ const AppRouter: React.FC = () => {
     return <LoginView onLoginSuccess={navigateToFullMap} />;
   }
 
-  const viewMode: ViewMode = route.view === 'detail' ? 'split' : 'map';
+  const viewMode: ViewMode =
+    route.view === 'system' ? 'system' : route.view === 'detail' ? 'split' : 'map';
 
   return (
     <div className="app-shell">
@@ -89,12 +115,19 @@ const AppRouter: React.FC = () => {
         onToggleFaultTolerance={() => setIsFaultTolerantDemoMode((prev) => !prev)}
       />
 
-      <DashboardView
-        selectedIntersectionId={route.view === 'detail' ? route.intersectionId || null : null}
-        onSelectIntersection={navigateToIntersectionDetail}
-        onCloseDetail={navigateToFullMap}
-        isFaultTolerantDemoMode={isFaultTolerantDemoMode}
-      />
+      {route.view === 'system' && session?.role === 'Administrador' ? (
+        <SystemBackendView
+          isFaultTolerantDemoMode={isFaultTolerantDemoMode}
+          onToggleFaultTolerance={() => setIsFaultTolerantDemoMode((prev) => !prev)}
+        />
+      ) : (
+        <DashboardView
+          selectedIntersectionId={route.view === 'detail' ? route.intersectionId || null : null}
+          onSelectIntersection={navigateToIntersectionDetail}
+          onCloseDetail={navigateToFullMap}
+          isFaultTolerantDemoMode={isFaultTolerantDemoMode}
+        />
+      )}
     </div>
   );
 };
