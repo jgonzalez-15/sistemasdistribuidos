@@ -15,6 +15,7 @@ const STATUS_LABEL = {
   congestionado: 'Crítico',
   moderado: 'Moderado',
   fluido: 'Fluido',
+  sin_datos: 'Sin datos (>1m)',
 } as const;
 
 export const NodeDetailPanel: React.FC<NodeDetailPanelProps> = ({
@@ -82,11 +83,14 @@ export const NodeDetailPanel: React.FC<NodeDetailPanelProps> = ({
   const { intersection, timeSeries, metrics } = detail;
   const activePattern = patternOverride || metrics.patternType;
   const isAnomalous = activePattern === 'anomalo';
+  const isNoData = intersection.status === 'sin_datos';
   const statusClass =
     intersection.status === 'congestionado'
       ? 'c-critical'
       : intersection.status === 'moderado'
       ? 'c-moderate'
+      : intersection.status === 'sin_datos'
+      ? 'c-tertiary'
       : 'c-fluid';
   const durationClass =
     metrics.congestionDurationMinutes > 15
@@ -131,12 +135,14 @@ export const NodeDetailPanel: React.FC<NodeDetailPanelProps> = ({
 
           <div className="node-kpis">
             <div className="kpi-row">
-              <div className="kpi">
-                <span className={`kpi-value ${statusClass}`}>{intersection.vehicleCount}</span>
-                <span className="kpi-unit">VEH</span>
+              <div className="kpi" title="Vehículos visibles en el clip (mediana por frame, densidad)">
+                <span className={`kpi-value ${statusClass}`}>
+                  {isNoData ? '—' : intersection.vehicleCount}
+                </span>
+                <span className="kpi-unit">{isNoData ? 'SIN DATOS' : 'VEH VIS.'}</span>
               </div>
               <div className="kpi secondary">
-                <span className="kpi-value">{intersection.averageSpeedKmh}</span>
+                <span className="kpi-value">{isNoData ? '—' : intersection.averageSpeedKmh}</span>
                 <span className="kpi-unit">KM/H</span>
               </div>
             </div>
@@ -152,9 +158,9 @@ export const NodeDetailPanel: React.FC<NodeDetailPanelProps> = ({
       <section className="inspector-section" aria-label="Evolución histórica vehicular">
         <div className="section-head">
           <div>
-            <div className="section-title">Evolución de volumen</div>
+            <div className="section-title">Vehículos visibles por clip (densidad)</div>
             <div className="section-sub">
-              {timeSeries[0]?.hour} — {timeSeries[timeSeries.length - 1]?.hour} · RESULTS_DB
+              {timeSeries[0]?.hour || '--:--'} — {timeSeries[timeSeries.length - 1]?.hour || '--:--'} · MEDIANA POR CLIP · RESULTS_DB
             </div>
           </div>
           <div className="section-stats">

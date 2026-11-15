@@ -160,21 +160,21 @@ const DIAGRAM_NODES: DiagramNodeSpec[] = [
     port: ':8001',
     kind: 'service',
     zone: 'EDGE INGESTION',
-    tech: 'FastAPI · Boto3 · Pika',
-    role: 'Captura clips de cámaras de Montevideo, sube MP4 a S3 y encola evento',
+    tech: 'Python · NumPy · Boto3 · Pika',
+    role: 'Simula 6 cámaras (cam-1..6 en int-1..3): sube clip .npy a MinIO y publica metadata (~300 B, Claim Check)',
     url: EDGE_PROCESSOR_URL,
     cx: 135,
     cy: 295,
   },
   {
     id: 'camera-queue',
-    title: 'Camera Queue',
+    title: 'Camera Queue + DLQ',
     container: 'camera-queue',
     port: ':5672',
     kind: 'broker',
     zone: 'MESSAGE BROKER #1',
-    tech: 'RabbitMQ 3.13 (AMQP)',
-    role: 'Cola durable camera_processing_queue · Desacopla ingesta y workers CV',
+    tech: 'RabbitMQ 3.13 (AMQP + DLX)',
+    role: 'Cola durable camera_processing_queue (delivery_mode=2) y desvío atómico a camera_dlq ante fallos',
     cx: 395,
     cy: 295,
   },
@@ -182,11 +182,11 @@ const DIAGRAM_NODES: DiagramNodeSpec[] = [
     id: 'cv-module',
     title: 'CV Module Workers',
     container: 'cv-module',
-    port: ':8002',
+    port: 'internal :8002',
     kind: 'service',
-    zone: 'CV WORKER POOL (x3)',
-    tech: 'FastAPI · YOLO/OpenCV',
-    role: 'Consume camera_processing_queue, procesa video y persiste conteo vehicular',
+    zone: 'CV WORKER POOL (--scale=3)',
+    tech: 'Python · Detector (Mediana)',
+    role: 'Descarga clip .npy de MinIO, cuenta vehículos por frame, inserta mediana en results y confirma ACK (D3/D12)',
     url: CV_MODULE_URL,
     cx: 660,
     cy: 295,
@@ -199,7 +199,7 @@ const DIAGRAM_NODES: DiagramNodeSpec[] = [
     kind: 'database',
     zone: 'TELEMETRY PERSISTENCE',
     tech: 'PostgreSQL 16 (results_db)',
-    role: 'Estado consolidado por intersección y serie temporal histórica',
+    role: 'Tabla results (clip_id UNIQUE idempotente, vehicle_count mediana visible, ts reloj del edge)',
     cx: 925,
     cy: 295,
   },
@@ -211,7 +211,7 @@ const DIAGRAM_NODES: DiagramNodeSpec[] = [
     kind: 'service',
     zone: 'ANALYTICS TIER',
     tech: 'FastAPI · Psycopg2',
-    role: 'Cálculo de saturación, velocidad media y detección de patrón',
+    role: 'Consulta results (último minuto, tramos de 5 min y detección de estado "sin datos" > 1 min)',
     url: VISUALIZATION_BACKEND_URL,
     cx: 1185,
     cy: 295,
@@ -224,9 +224,9 @@ const DIAGRAM_NODES: DiagramNodeSpec[] = [
     container: 'clips-db',
     port: ':9000',
     kind: 'object-store',
-    zone: 'OBJECT STORAGE',
-    tech: 'MinIO S3 (s3://clips)',
-    role: 'Almacenamiento de fragmentos de video MP4 crudos',
+    zone: 'OBJECT STORAGE (CLAIM CHECK)',
+    tech: 'MinIO S3 (bucket clips)',
+    role: 'Almacena clips cam-N/<clip_id>.npy (~190 KB) para no saturar RabbitMQ (D1)',
     cx: 135,
     cy: 498,
   },
@@ -238,8 +238,8 @@ const DIAGRAM_NODES: DiagramNodeSpec[] = [
     kind: 'broker',
     zone: 'MESSAGE BROKER #2',
     tech: 'RabbitMQ 3.13 (AMQP)',
-    role: 'Cola durable logs_queue · Centraliza eventos y auditoría del sistema',
-    cx: 660,
+    role: 'Cola durable logs_queue · Eventos JSON asíncronos con trace_id = clip_id (D15)',
+    cx: 760,
     cy: 498,
   },
   {
@@ -250,9 +250,9 @@ const DIAGRAM_NODES: DiagramNodeSpec[] = [
     kind: 'service',
     zone: 'OBSERVABILITY',
     tech: 'FastAPI · Pika · Httpx',
-    role: 'Consumidor de logs_queue y chequeo de salud de contenedores',
+    role: 'Consume logs_queue (clips/min, latencia duration_ms, errores por stage y alertas DLQ)',
     url: MONITORING_PIPELINE_URL,
-    cx: 925,
+    cx: 1080,
     cy: 498,
   },
 ];
@@ -305,7 +305,7 @@ const DIAGRAM_LINKS: DiagramLinkSpec[] = [
     id: 'edge-processor->camera-queue',
     from: 'edge-processor',
     to: 'camera-queue',
-    protocol: 'AMQP PUB :5672',
+    protocol: 'AMQP META (~300B)',
     color: '#F59E0B',
     points: [
       [237, 295],
@@ -317,7 +317,7 @@ const DIAGRAM_LINKS: DiagramLinkSpec[] = [
     id: 'camera-queue->cv-module',
     from: 'camera-queue',
     to: 'cv-module',
-    protocol: 'AMQP CONSUME',
+    protocol: 'AMQP + ACK D3',
     color: '#10B981',
     points: [
       [497, 295],
@@ -350,30 +350,43 @@ const DIAGRAM_LINKS: DiagramLinkSpec[] = [
     labelPos: [1055, 278],
   },
 
-  // Clean vertical / orthogonal links between rows (zero crossings)
+  // Clean vertical / orthogonal links between rows (strictly ordered x = 135 < 605 < 695 < 792)
   {
     id: 'edge-processor->clips-db',
     from: 'edge-processor',
     to: 'clips-db',
-    protocol: 'S3 PUT MP4',
+    protocol: 'S3 PUT .npy',
     color: '#38BDF8',
     points: [
       [135, 337],
       [135, 456],
     ],
-    labelPos: [182, 396],
+    labelPos: [184, 396],
+  },
+  {
+    id: 'clips-db->cv-module',
+    from: 'clips-db',
+    to: 'cv-module',
+    protocol: 'S3 GET .npy (D1)',
+    color: '#38BDF8',
+    points: [
+      [237, 498],
+      [605, 498],
+      [605, 337],
+    ],
+    labelPos: [420, 482],
   },
   {
     id: 'cv-module->logs-queue',
     from: 'cv-module',
     to: 'logs-queue',
-    protocol: 'AMQP LOG',
+    protocol: 'JSON LOG :5673',
     color: '#F59E0B',
     points: [
-      [660, 337],
-      [660, 456],
+      [695, 337],
+      [695, 456],
     ],
-    labelPos: [704, 396],
+    labelPos: [642, 396],
   },
   {
     id: 'logs-queue->monitoring-pipeline',
@@ -382,10 +395,10 @@ const DIAGRAM_LINKS: DiagramLinkSpec[] = [
     protocol: 'AMQP CONSUME :5673',
     color: '#38BDF8',
     points: [
-      [762, 498],
-      [823, 498],
+      [862, 498],
+      [978, 498],
     ],
-    labelPos: [792, 481],
+    labelPos: [920, 481],
   },
   {
     id: 'visualization-backend->api-rest',
@@ -393,7 +406,6 @@ const DIAGRAM_LINKS: DiagramLinkSpec[] = [
     to: 'api-rest',
     protocol: 'HTTP :8003',
     color: '#3B82F6',
-    // Cleanly rises from top of visualization-backend into the open corridor at y=162 and enters api-rest bottom-right
     points: [
       [1185, 253],
       [1185, 162],
@@ -406,17 +418,15 @@ const DIAGRAM_LINKS: DiagramLinkSpec[] = [
     id: 'api-rest->logs-queue',
     from: 'api-rest',
     to: 'logs-queue',
-    protocol: 'AMQP LOG :5673',
+    protocol: 'JSON LOG :5673',
     color: '#F59E0B',
-    // Routes cleanly down the open vertical corridor at x=527 (between col 2 and col 3) into the left side of logs-queue
     points: [
-      [600, 134],
-      [600, 168],
-      [527, 168],
-      [527, 498],
-      [558, 498],
+      [680, 134],
+      [680, 182],
+      [792, 182],
+      [792, 456],
     ],
-    labelPos: [478, 396],
+    labelPos: [842, 396],
   },
 ];
 
@@ -516,7 +526,7 @@ export const SystemBackendView: React.FC<SystemBackendViewProps> = ({
         service: 'EDGE-PROC',
         level: 'INFO',
         queue: 'camera_processing_queue',
-        message: 'Uploaded s3://clips/CAM-MVD-101.mp4 -> Published frame task to camera_processing_queue',
+        message: 'event="clip_published" · Uploaded s3://clips/cam-1/dafa2e50.npy -> Published metadata (~300 B) to camera_processing_queue',
       },
       {
         id: 'init-4',
@@ -524,7 +534,7 @@ export const SystemBackendView: React.FC<SystemBackendViewProps> = ({
         service: 'CV-MODULE',
         level: 'ACK',
         queue: 'camera_processing_queue',
-        message: 'Worker cv-worker-02 ACK CAM-MVD-101 (98 veh · 12 km/h) -> INSERT INTO results-db:5434',
+        message: 'event="clip_processed" · cam-1 (int-1) vehicle_count=12 (mediana 8 frames) -> INSERT INTO results-db:5434 -> AMQP ACK',
       },
     ];
   });
@@ -671,57 +681,59 @@ export const SystemBackendView: React.FC<SystemBackendViewProps> = ({
     };
   }, [appendLog]);
 
-  // Flow 1: Camera Frame Ingestion -> S3 + RabbitMQ -> CV Worker -> Results DB -> Visualization & Logs
+  // Flow 1: Camera Clip Ingestion (.npy) -> MinIO + RabbitMQ (Claim Check) -> CV Worker (Mediana) -> Results DB -> ACK
   const triggerCameraPipelineFlow = useCallback(() => {
-    const cams = ['CAM-MVD-101', 'CAM-MVD-102', 'CAM-MVD-103', 'CAM-MVD-104', 'CAM-MVD-107'];
+    const cams = ['cam-1', 'cam-2', 'cam-3', 'cam-4', 'cam-5', 'cam-6'];
     const cam = cams[Math.floor(Math.random() * cams.length)];
+    const intId = `int-${Math.floor(( Number(cam.split('-')[1]) + 1 ) / 2)}`;
 
-    pulseNodeProcessing('edge-processor', `CAPTURANDO ${cam}`, 700);
+    pulseNodeProcessing('edge-processor', `CLIP .NPY ${cam}`, 700);
 
-    spawnPacket('edge-processor->clips-db', `PUT ${cam}.mp4`, 880, () => {
-      pulseNodeProcessing('clips-db', 'S3 WRITE OK', 600);
+    spawnPacket('edge-processor->clips-db', `PUT ${cam}.npy`, 880, () => {
+      pulseNodeProcessing('clips-db', 'MINIO .NPY OK', 600);
       setClipsCount((c) => c + 1);
     });
 
-    spawnPacket('edge-processor->camera-queue', `ENQUEUE ${cam}`, 920, () => {
+    spawnPacket('edge-processor->camera-queue', `META ~300B ${cam}`, 920, () => {
       if (isFaultTolerantDemoMode) {
-        pulseNodeProcessing('camera-queue', 'RETENIENDO MSG', 1000);
+        pulseNodeProcessing('camera-queue', 'PERSISTIDO EN COLA', 1000);
         setCameraQueueReady((q) => q + 1);
         appendLog(
           'RABBITMQ',
           'WARN',
           'camera_processing_queue',
-          `cv-module workers offline · Frame ${cam} buffered in durable queue camera_processing_queue`
+          `cv-module workers offline · Metadata ${cam} (${intId}) retenida en camera_processing_queue (delivery_mode=2)`
         );
         return;
       }
 
-      pulseNodeProcessing('camera-queue', 'ROUTING AMQP', 600);
+      pulseNodeProcessing('camera-queue', 'CLAIM CHECK', 600);
       setCameraQueueReady((q) => Math.max(1, (q % 5) + 1));
 
-      spawnPacket('camera-queue->cv-module', `FRAME ${cam}`, 920, () => {
-        pulseNodeProcessing('cv-module', `YOLO INFERENCE · ${cam}`, 950);
+      spawnPacket('camera-queue->cv-module', `META ${cam}`, 900, () => {
+        spawnPacket('clips-db->cv-module', `GET ${cam}.npy`, 780);
+        pulseNodeProcessing('cv-module', `DETECTOR MEDIANA · ${cam}`, 950);
 
-        const count = Math.floor(Math.random() * 75) + 28;
-        spawnPacket('cv-module->results-db', `INSERT ${count} VEH`, 860, () => {
-          pulseNodeProcessing('results-db', 'COMMIT SQL', 600);
+        const count = Math.floor(Math.random() * 45) + 12;
+        spawnPacket('cv-module->results-db', `MEDIANA ${count} VEH`, 860, () => {
+          pulseNodeProcessing('results-db', 'COMMIT + ACK D3', 600);
           setResultsDbCount((r) => r + 1);
 
-          spawnPacket('results-db->visualization-backend', `SERIES ${cam}`, 820, () => {
-            pulseNodeProcessing('visualization-backend', 'AGGREGATING', 650);
+          spawnPacket('results-db->visualization-backend', `AVG ${intId}`, 820, () => {
+            pulseNodeProcessing('visualization-backend', 'QUERY < 1m', 650);
           });
         });
 
-        spawnPacket('cv-module->logs-queue', `LOG ACK ${cam}`, 880, () => {
-          pulseNodeProcessing('logs-queue', 'ENQUEUE LOG', 550);
+        spawnPacket('cv-module->logs-queue', `ACK ${cam}`, 880, () => {
+          pulseNodeProcessing('logs-queue', 'JSON LOG', 550);
           appendLog(
             'CV-MODULE',
             'ACK',
             'camera_processing_queue',
-            `Processed ${cam} (${count} veh) -> committed to results-db:5434`
+            `event="clip_processed" camera_id="${cam}" intersection_id="${intId}" vehicle_count=${count} -> results-db + ACK`
           );
-          spawnPacket('logs-queue->monitoring-pipeline', 'METRIC BATCH', 820, () => {
-            pulseNodeProcessing('monitoring-pipeline', 'INDEXED', 550);
+          spawnPacket('logs-queue->monitoring-pipeline', 'CLIP_PROCESSED', 820, () => {
+            pulseNodeProcessing('monitoring-pipeline', 'METRICS OK', 550);
           });
         });
       });
@@ -824,17 +836,17 @@ export const SystemBackendView: React.FC<SystemBackendViewProps> = ({
       case 'auth-db':
         return '12 USERS · :5433';
       case 'edge-processor':
-        return '8 CAMERAS · 8 fps';
+        return '6 CAMS · 1 clip/5s';
       case 'camera-queue':
         return isFaultTolerantDemoMode
           ? `${cameraQueueReady} MSG RETAINED`
-          : `${cameraQueueReady} READY · 8.4/s`;
+          : `${cameraQueueReady} READY · DLQ=0`;
       case 'cv-module':
-        return isFaultTolerantDemoMode ? '0/3 WORKERS (PAUSED)' : '3/3 WORKERS · 42ms';
+        return isFaultTolerantDemoMode ? '0/3 WORKERS (PAUSED)' : '3 REPLICAS · 6ms';
       case 'results-db':
         return `${resultsDbCount.toLocaleString()} ROWS`;
       case 'clips-db':
-        return `${clipsCount} MP4 CLIPS`;
+        return `${clipsCount} .NPY CLIPS`;
       case 'visualization-backend':
         return 'SERIES · 12 req/s';
       case 'logs-queue':
@@ -1036,6 +1048,7 @@ export const SystemBackendView: React.FC<SystemBackendViewProps> = ({
                 const isBlockedCvLink =
                   isFaultTolerantDemoMode &&
                   (link.id === 'camera-queue->cv-module' ||
+                    link.id === 'clips-db->cv-module' ||
                     link.id === 'cv-module->results-db' ||
                     link.id === 'cv-module->logs-queue');
 

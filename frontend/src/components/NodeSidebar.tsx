@@ -19,6 +19,7 @@ const FILTERS: { key: StatusFilter; label: string }[] = [
   { key: 'congestionado', label: 'Crítico' },
   { key: 'moderado', label: 'Mod' },
   { key: 'fluido', label: 'Fluido' },
+  { key: 'sin_datos', label: 'Sin datos' },
 ];
 
 export const NodeSidebar: React.FC<NodeSidebarProps> = ({
@@ -33,7 +34,9 @@ export const NodeSidebar: React.FC<NodeSidebarProps> = ({
   const critical = intersections.filter((i) => i.status === 'congestionado').length;
   const moderate = intersections.filter((i) => i.status === 'moderado').length;
   const fluid = intersections.filter((i) => i.status === 'fluido').length;
-  const totalVehicles = intersections.reduce((acc, i) => acc + i.vehicleCount, 0);
+  const totalVehicles = intersections
+    .filter((i) => i.status !== 'sin_datos')
+    .reduce((acc, i) => acc + i.vehicleCount, 0);
 
   const visible =
     filterStatus === 'todos'
@@ -91,13 +94,16 @@ export const NodeSidebar: React.FC<NodeSidebarProps> = ({
 
       <div className="node-list-head">
         <span className="label-caps">Intersección</span>
-        <span className="label-caps">Veh</span>
+        <span className="label-caps" title="Vehículos visibles en el clip (mediana por frame)">
+          Veh visibles
+        </span>
       </div>
 
       <ul className="node-list">
         {visible.length === 0 && <li className="node-list-empty">SIN NODOS EN ESTE ESTADO</li>}
         {visible.map((item) => {
           const isSelected = item.id === selectedIntersectionId;
+          const isNoData = item.status === 'sin_datos';
           return (
             <li key={item.id}>
               <button
@@ -105,11 +111,13 @@ export const NodeSidebar: React.FC<NodeSidebarProps> = ({
                 className={`node-row ${isSelected ? 'selected' : ''}`}
                 onClick={() => (isSelected ? onCloseDetail() : onSelectIntersection(item.id))}
                 data-testid={`intersection-card-${item.id}`}
-                title={item.name}
+                title={`${item.name} · ${item.lastUpdated}`}
               >
                 <span className={`status-dot ${item.status}`} />
                 <span className="node-row-name">{item.name}</span>
-                <span className="node-row-count">{item.vehicleCount}</span>
+                <span className={`node-row-count ${isNoData ? 'c-tertiary' : ''}`}>
+                  {isNoData ? 'SIN DATOS' : item.vehicleCount}
+                </span>
               </button>
             </li>
           );
@@ -117,7 +125,7 @@ export const NodeSidebar: React.FC<NodeSidebarProps> = ({
       </ul>
 
       <div className="sidebar-foot">
-        <span>TOTAL RED</span>
+        <span>VEH VISIBLES (RED)</span>
         <span>
           <strong>{totalVehicles}</strong> VEH
         </span>

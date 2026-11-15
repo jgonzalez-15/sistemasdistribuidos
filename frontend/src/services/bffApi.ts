@@ -232,13 +232,29 @@ export async function fetchIntersectionAnalyticsFromBff(
 ): Promise<IntersectionAnalyticsDetail> {
   const token = localStorage.getItem(STORAGE_TOKEN_KEY);
 
+  // Si el usuario abrió la vista dividida con un ID mock (ej. int-001) pero el backend real
+  // usa IDs D4 (int-1, int-2, int-3), resolvemos automáticamente al ID equivalente.
+  let resolvedId = intersectionId;
+  if (
+    currentIntersectionsState.length > 0 &&
+    !currentIntersectionsState.some((i) => i.id === intersectionId)
+  ) {
+    const numMatch = intersectionId.match(/^int-0*(\d+)$/);
+    const candidateId = numMatch ? `int-${numMatch[1]}` : null;
+    if (candidateId && currentIntersectionsState.some((i) => i.id === candidateId)) {
+      resolvedId = candidateId;
+    } else {
+      resolvedId = currentIntersectionsState[0].id;
+    }
+  }
+
   if (!hasLocalSimulationUpdates) {
     try {
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), 1500);
 
       const response = await fetch(
-        `${API_REST_URL}/api/intersections/${encodeURIComponent(intersectionId)}/history`,
+        `${API_REST_URL}/api/intersections/${encodeURIComponent(resolvedId)}/history`,
         {
           method: 'GET',
           headers: {
@@ -261,7 +277,7 @@ export async function fetchIntersectionAnalyticsFromBff(
   }
 
   const found =
-    currentIntersectionsState.find((i) => i.id === intersectionId) ||
+    currentIntersectionsState.find((i) => i.id === resolvedId) ||
     currentIntersectionsState[0];
 
   const series = currentTimeSeriesById[found.id];

@@ -53,21 +53,34 @@ def compute_average_speed(status: str, vehicle_count: int) -> int:
     return 50
 
 
-def build_intersection_summary(row: dict, cameras: List[dict], latest_results: List[dict]) -> dict:
+def build_intersection_summary(
+    row: dict,
+    cameras: List[dict],
+    recent_stat: Optional[dict],
+    last_seen_ts: Optional[Any] = None,
+) -> dict:
     camera_codes = ", ".join(c["code"] for c in cameras) if cameras else row["id"].upper()
 
-    if latest_results:
-        vehicle_count = sum(r["vehicle_count"] for r in latest_results)
-        latest_ts = max(r["ts"] for r in latest_results)
+    # Según Sección 4 de la guía: "Sin datos" no equivale a "sin congestión".
+    # Si no hay clips en el último minuto (recent_stat is None), se marca como "sin_datos"
+    # y se muestra la hora del último dato registrado (last_seen_ts).
+    if recent_stat and recent_stat.get("clips", 0) > 0:
+        vehicle_count = int(round(float(recent_stat["vehiculos_promedio"])))
+        latest_ts = recent_stat["ultimo_dato"]
         last_updated = f"{latest_ts.strftime('%H:%M:%S')} hs"
-        worker_node_id = latest_results[0]["processed_by"]
+        worker_node_id = recent_stat.get("processed_by") or "cv-module"
+        status = compute_congestion_level(vehicle_count)
+        avg_speed = compute_average_speed(status, vehicle_count)
     else:
         vehicle_count = 0
-        last_updated = "Sin datos recientes"
+        if last_seen_ts is not None:
+            last_updated = f"Últ. dato {last_seen_ts.strftime('%H:%M:%S')} hs"
+        else:
+            last_updated = "Sin datos recientes"
         worker_node_id = "sin-datos"
+        status = "sin_datos"
+        avg_speed = 0
 
-    status = compute_congestion_level(vehicle_count)
-    avg_speed = compute_average_speed(status, vehicle_count)
     corridors = row.get("street_corridors") or []
     if isinstance(corridors, str):
         corridors = json.loads(corridors)
@@ -132,29 +145,43 @@ def get_intersections():
             cur.execute("SELECT * FROM cameras ORDER BY id ASC")
             all_cameras = cur.fetchall()
 
-            # Latest result per (intersection_id, camera_id)
+            # Consulta verificada de la Sección 4: Estado actual por intersección (último minuto)
             cur.execute("""
-                SELECT DISTINCT ON (intersection_id, camera_id)
-                    intersection_id, camera_id, vehicle_count, ts, processed_by
+                SELECT
+                    intersection_id,
+                    ROUND(AVG(vehicle_count), 1) AS vehiculos_promedio,
+                    COUNT(*) AS clips,
+                    MAX(ts) AS ultimo_dato,
+                    (ARRAY_AGG(processed_by ORDER BY ts DESC))[1] AS processed_by
                 FROM results
-                ORDER BY intersection_id, camera_id, ts DESC
+                WHERE ts > now() - interval '1 minute'
+                GROUP BY intersection_id
+                ORDER BY intersection_id
             """)
-            latest_rows = cur.fetchall()
+            recent_rows = cur.fetchall()
+
+            # Último dato histórico para intersecciones sin datos en el último minuto
+            cur.execute("""
+                SELECT intersection_id, MAX(ts) AS ultimo_dato
+                FROM results
+                GROUP BY intersection_id
+            """)
+            last_seen_rows = cur.fetchall()
         conn.close()
 
         cameras_by_int = {}
         for cam in all_cameras:
             cameras_by_int.setdefault(cam["intersection_id"], []).append(cam)
 
-        results_by_int = {}
-        for res in latest_rows:
-            results_by_int.setdefault(res["intersection_id"], []).append(res)
+        recent_by_int = {r["intersection_id"]: r for r in recent_rows}
+        last_seen_by_int = {r["intersection_id"]: r["ultimo_dato"] for r in last_seen_rows}
 
         summaries = [
             build_intersection_summary(
                 row=inter,
                 cameras=cameras_by_int.get(inter["id"], []),
-                latest_results=results_by_int.get(inter["id"], []),
+                recent_stat=recent_by_int.get(inter["id"]),
+                last_seen_ts=last_seen_by_int.get(inter["id"]),
             )
             for inter in intersections
         ]
@@ -181,35 +208,49 @@ def get_intersection_history(intersection_id: str, limit: int = 14):
             cur.execute("SELECT * FROM cameras WHERE intersection_id = %s ORDER BY id ASC", (intersection_id,))
             cameras = cur.fetchall()
 
-            cur.execute("""
-                SELECT DISTINCT ON (camera_id)
-                    intersection_id, camera_id, vehicle_count, ts, processed_by
-                FROM results
-                WHERE intersection_id = %s
-                ORDER BY camera_id, ts DESC
-            """, (intersection_id,))
-            latest_rows = cur.fetchall()
-
-            # Aggregate vehicle counts by timestamp bucket (rounded to 10-second or minute intervals)
+            # Estado actual en el último minuto (Sección 4)
             cur.execute("""
                 SELECT
-                    date_trunc('minute', ts) AS bucket_ts,
-                    SUM(vehicle_count)::int AS total_vehicles
-                FROM (
-                    SELECT DISTINCT ON (date_trunc('minute', ts), camera_id)
-                        ts, camera_id, vehicle_count
-                    FROM results
-                    WHERE intersection_id = %s
-                    ORDER BY date_trunc('minute', ts) DESC, camera_id, ts DESC
-                ) sub
-                GROUP BY bucket_ts
-                ORDER BY bucket_ts DESC
+                    intersection_id,
+                    ROUND(AVG(vehicle_count), 1) AS vehiculos_promedio,
+                    COUNT(*) AS clips,
+                    MAX(ts) AS ultimo_dato,
+                    (ARRAY_AGG(processed_by ORDER BY ts DESC))[1] AS processed_by
+                FROM results
+                WHERE intersection_id = %s AND ts > now() - interval '1 minute'
+                GROUP BY intersection_id
+            """, (intersection_id,))
+            recent_stat = cur.fetchone()
+
+            cur.execute("""
+                SELECT MAX(ts) AS ultimo_dato
+                FROM results
+                WHERE intersection_id = %s
+            """, (intersection_id,))
+            last_seen_row = cur.fetchone()
+            last_seen_ts = last_seen_row["ultimo_dato"] if last_seen_row else None
+
+            # Histórico en tramos de 5 minutos (última hora) según consulta de Sección 4,
+            # con fallback a tramos de 1 minuto si recién arranca el contenedor
+            cur.execute("""
+                SELECT
+                    date_bin('5 minutes', ts, TIMESTAMPTZ '2000-01-01') AS bucket_ts,
+                    ROUND(AVG(vehicle_count))::int AS total_vehicles
+                FROM results
+                WHERE intersection_id = %s AND ts > now() - interval '1 hour'
+                GROUP BY 1
+                ORDER BY 1 DESC
                 LIMIT %s
             """, (intersection_id, limit))
             history_rows = cur.fetchall()
         conn.close()
 
-        summary = build_intersection_summary(inter, cameras, latest_rows)
+        summary = build_intersection_summary(
+            row=inter,
+            cameras=cameras,
+            recent_stat=recent_stat,
+            last_seen_ts=last_seen_ts,
+        )
 
         # Reverse so timeSeries is chronological
         history_rows = list(reversed(history_rows))

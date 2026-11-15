@@ -120,6 +120,7 @@ code {
 .status-dot.congestionado { background: var(--critical); box-shadow: 0 0 6px rgba(239, 68, 68, 0.6); }
 .status-dot.moderado { background: var(--moderate); box-shadow: 0 0 6px rgba(245, 158, 11, 0.5); }
 .status-dot.fluido { background: var(--fluid); box-shadow: 0 0 6px rgba(16, 185, 129, 0.5); }
+.status-dot.sin_datos { background: var(--text-tertiary); box-shadow: none; }
 
 /* Technical tooltip (data-tooltip) */
 [data-tooltip] {
@@ -830,6 +831,7 @@ code {
 .tm-marker.congestionado { --c: var(--critical); --c-soft: rgba(239, 68, 68, 0.2); }
 .tm-marker.moderado { --c: var(--moderate); --c-soft: rgba(245, 158, 11, 0.2); }
 .tm-marker.fluido { --c: var(--fluid); --c-soft: rgba(16, 185, 129, 0.18); }
+.tm-marker.sin_datos { --c: #71717a; --c-soft: rgba(113, 113, 122, 0.18); }
 
 .tm-marker:hover {
   transform: scale(1.08);

@@ -14,11 +14,15 @@ const STATUS_COLORS: Record<CongestionLevel, { line: string; label: string }> = 
   congestionado: { line: '#EF4444', label: 'Crítico' },
   moderado: { line: '#F59E0B', label: 'Moderado' },
   fluido: { line: '#10B981', label: 'Fluido' },
+  sin_datos: { line: '#71717A', label: 'Sin datos' },
 };
 
 function buildHoverCardHtml(item: IntersectionSummary): string {
-  const palette = STATUS_COLORS[item.status];
-  const occupancyPct = Math.min(100, Math.round((item.vehicleCount / item.maxCapacity) * 100));
+  const palette = STATUS_COLORS[item.status] || STATUS_COLORS.sin_datos;
+  const isNoData = item.status === 'sin_datos';
+  const occupancyPct = isNoData
+    ? 0
+    : Math.min(100, Math.round((item.vehicleCount / item.maxCapacity) * 100));
 
   return `
     <div class="tm-hover-card">
@@ -28,9 +32,11 @@ function buildHoverCardHtml(item: IntersectionSummary): string {
       </div>
       <div class="tm-hover-title">${item.name}</div>
       <div class="tm-hover-kpis">
-        <div class="tm-hover-kpi"><strong>${item.vehicleCount}</strong><span>VEH</span></div>
-        <div class="tm-hover-kpi"><strong>${item.averageSpeedKmh}</strong><span>KM/H</span></div>
-        <div class="tm-hover-kpi"><strong>${occupancyPct}%</strong><span>OCUP.</span></div>
+        <div class="tm-hover-kpi"><strong>${isNoData ? '—' : item.vehicleCount}</strong><span>VEH VIS.</span></div>
+        <div class="tm-hover-kpi"><strong>${isNoData ? '—' : item.averageSpeedKmh}</strong><span>KM/H</span></div>
+        <div class="tm-hover-kpi"><strong>${isNoData ? 'SIN DATOS' : `${occupancyPct}%`}</strong><span>${
+          isNoData ? item.lastUpdated.toUpperCase() : 'DENSIDAD'
+        }</span></div>
       </div>
       <div class="tm-hover-bar"><div style="width:${occupancyPct}%;background:${palette.line}"></div></div>
     </div>
@@ -177,10 +183,13 @@ export const TrafficMap: React.FC<TrafficMapProps> = ({
         layerGroup.addLayer(flow);
       });
 
+      const isNoData = intersection.status === 'sin_datos';
       const markerHtml = `
         <div class="tm-marker ${intersection.status} ${isSelected ? 'is-selected' : ''}" data-testid="map-node-${intersection.id}">
-          <span class="tm-marker-core">${intersection.vehicleCount}</span>
-          <span class="tm-marker-speed">${intersection.averageSpeedKmh}<small>KM/H</small></span>
+          <span class="tm-marker-core">${isNoData ? '—' : intersection.vehicleCount}</span>
+          <span class="tm-marker-speed">${
+            isNoData ? '<small>SIN DATOS</small>' : `${intersection.averageSpeedKmh}<small>KM/H</small>`
+          }</span>
         </div>
       `;
 

@@ -13,7 +13,7 @@ export interface LoginCredentials {
   role?: UserRole;
 }
 
-export type CongestionLevel = 'fluido' | 'moderado' | 'congestionado';
+export type CongestionLevel = 'fluido' | 'moderado' | 'congestionado' | 'sin_datos';
 
 export interface StreetCorridor {
   name: string;

@@ -201,7 +201,7 @@ export const TrafficLineChart: React.FC<TrafficLineChartProps> = ({ data, maxCap
 
       <div className="chart-legend">
         <span>
-          <i className="legend-swatch" /> VOLUMEN VEH/H
+          <i className="legend-swatch" /> VEH VISIBLES (MEDIANA/CLIP)
         </span>
         <span>
           <i className="legend-swatch dashed" /> UMBRALES 75 · 40
