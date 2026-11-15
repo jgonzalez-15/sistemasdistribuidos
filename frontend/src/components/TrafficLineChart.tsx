@@ -93,10 +93,10 @@ export const TrafficLineChart: React.FC<TrafficLineChartProps> = ({ data, maxCap
               x2={width - PAD.right}
               y1={getY(t)}
               y2={getY(t)}
-              stroke="rgba(255,255,255,0.05)"
+              stroke="var(--border)"
               strokeWidth="1"
             />
-            <text x={PAD.left - 8} y={getY(t) + 3.5} textAnchor="end" fill="#52525B" fontSize="11">
+            <text x={PAD.left - 8} y={getY(t) + 3.5} textAnchor="end" fill="var(--text-tertiary)" fontSize="11">
               {t}
             </text>
           </g>
@@ -109,18 +109,18 @@ export const TrafficLineChart: React.FC<TrafficLineChartProps> = ({ data, maxCap
               x2={width - PAD.right}
               y1={getY(th.value)}
               y2={getY(th.value)}
-              stroke="rgba(255,255,255,0.14)"
+              stroke="var(--border-strong)"
               strokeWidth="1"
               strokeDasharray="3 4"
             />
-            <text x={width - PAD.right + 6} y={getY(th.value) + 3.5} fill="#52525B" fontSize="9.5">
+            <text x={width - PAD.right + 6} y={getY(th.value) + 3.5} fill="var(--text-tertiary)" fontSize="9.5">
               {th.label}
             </text>
           </g>
         ))}
 
         <path d={areaPath} fill="url(#tmAreaGrad)" />
-        <path d={linePath} fill="none" stroke="#3B82F6" strokeWidth="1.75" strokeLinejoin="round" strokeLinecap="round" />
+        <path d={linePath} fill="none" stroke="var(--accent)" strokeWidth="1.75" strokeLinejoin="round" strokeLinecap="round" />
 
         {data.map((pt, i) =>
           i % labelStep === 0 || i === lastIdx ? (
@@ -130,7 +130,7 @@ export const TrafficLineChart: React.FC<TrafficLineChartProps> = ({ data, maxCap
                 x={getX(i)}
                 y={HEIGHT - 6}
                 textAnchor={i === 0 ? 'start' : i === lastIdx ? 'end' : 'middle'}
-                fill={i === activeIdx ? '#FAFAFA' : '#52525B'}
+                fill={i === activeIdx ? 'var(--text-primary)' : 'var(--text-tertiary)'}
                 fontSize="11"
               >
                 {pt.hour}
@@ -146,7 +146,7 @@ export const TrafficLineChart: React.FC<TrafficLineChartProps> = ({ data, maxCap
           cy={getY(lastPoint.vehicles)}
           r="3"
           fill={colorForValue(lastPoint.vehicles)}
-          stroke="#09090B"
+          stroke="var(--canvas)"
           strokeWidth="1.5"
         />
 
@@ -157,14 +157,14 @@ export const TrafficLineChart: React.FC<TrafficLineChartProps> = ({ data, maxCap
               x2={getX(activeIdx)}
               y1={PAD.top}
               y2={PAD.top + plotH}
-              stroke="rgba(255,255,255,0.18)"
+              stroke="var(--border-strong)"
               strokeWidth="1"
             />
             <circle
               cx={getX(activeIdx)}
               cy={getY(activePoint.vehicles)}
               r="3.5"
-              fill="#09090B"
+              fill="var(--canvas)"
               stroke={colorForValue(activePoint.vehicles)}
               strokeWidth="1.75"
             />

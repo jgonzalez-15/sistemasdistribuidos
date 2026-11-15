@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { AuthProvider, useAuth } from './context/AuthContext';
-import { Header, ViewMode } from './components/Header';
+import { Header, ThemeMode, ViewMode } from './components/Header';
 import { LoginView } from './components/LoginView';
 import { DashboardView } from './views/DashboardView';
 import { SystemBackendView } from './views/SystemBackendView';
@@ -40,7 +40,28 @@ const AppRouter: React.FC = () => {
     parseHashRoute(isAuthenticated, session?.role)
   );
   const [isFaultTolerantDemoMode, setIsFaultTolerantDemoMode] = useState<boolean>(false);
+  const [theme, setTheme] = useState<ThemeMode>(() => {
+    try {
+      const saved = window.localStorage.getItem('sgtu_theme');
+      return saved === 'light' || saved === 'dark' ? saved : 'dark';
+    } catch {
+      return 'dark';
+    }
+  });
   const lastSelectedIdRef = useRef<string>('int-001');
+
+  useEffect(() => {
+    document.documentElement.setAttribute('data-theme', theme);
+    try {
+      window.localStorage.setItem('sgtu_theme', theme);
+    } catch {
+      // ignore storage errors
+    }
+  }, [theme]);
+
+  const toggleTheme = () => {
+    setTheme((prev) => (prev === 'dark' ? 'light' : 'dark'));
+  };
 
   useEffect(() => {
     const syncFromHash = () => {
@@ -99,7 +120,13 @@ const AppRouter: React.FC = () => {
   };
 
   if (!isAuthenticated || route.view === 'login') {
-    return <LoginView onLoginSuccess={navigateToFullMap} />;
+    return (
+      <LoginView
+        onLoginSuccess={navigateToFullMap}
+        theme={theme}
+        onToggleTheme={toggleTheme}
+      />
+    );
   }
 
   const viewMode: ViewMode =
@@ -113,6 +140,8 @@ const AppRouter: React.FC = () => {
         onNavigateHome={navigateToFullMap}
         isFaultTolerantDemoMode={isFaultTolerantDemoMode}
         onToggleFaultTolerance={() => setIsFaultTolerantDemoMode((prev) => !prev)}
+        theme={theme}
+        onToggleTheme={toggleTheme}
       />
 
       {route.view === 'system' && session?.role === 'Administrador' ? (
