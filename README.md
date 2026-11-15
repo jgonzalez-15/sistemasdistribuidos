@@ -10,7 +10,7 @@ Every component in this repository is isolated in its own container and configur
 | :--- | :--- | :--- | :--- | :--- |
 | **API REST** | `./api-rest` | Python (FastAPI) | `8000` | `api-rest/main.py`, `api-rest/config.py` |
 | **Edge Processor** | `./edge-processor` | Python (FastAPI) | `8001` | `edge-processor/main.py`, `edge-processor/config.py` |
-| **Computer Vision Module** | `./cv-module` | Python (FastAPI) | `8002` | `cv-module/main.py`, `cv-module/config.py` |
+| **Computer Vision Module** | `./cv-module` | Python (FastAPI) | `8002` (solo red interna, sin puerto en el host: se escala con `--scale`) | `cv-module/main.py`, `cv-module/config.py` |
 | **Visualization Backend** | `./visualization-backend` | Python (FastAPI) | `8003` | `visualization-backend/main.py`, `visualization-backend/config.py` |
 | **Monitoring Metrics Pipeline** | `./monitoring-pipeline` | Python (FastAPI) | `8004` | `monitoring-pipeline/main.py`, `monitoring-pipeline/config.py` |
 | **Auth Service** | `./auth-service` | Python (FastAPI) | `8005` | `auth-service/main.py`, `auth-service/config.py` |
@@ -23,6 +23,9 @@ Every component in this repository is isolated in its own container and configur
 - **Camera Processing Queue (`camera-queue` - RabbitMQ Container 1)**:
   - **Ports**: Host `5672` $\rightarrow$ Container `5672` (AMQP), Host `15672` $\rightarrow$ Container `15672` (Management UI — `guest` / `guest`)
   - **Pre-configured Queue** (in `infrastructure/camera-queue/definitions.json`): `camera_processing_queue`
+  - **Dead-letter queue:** `camera_processing_queue` tiene `x-dead-letter-exchange: dlx`. El exchange `dlx` (fanout) entrega a la cola `camera_dlq`. Un mensaje rechazado con `basic_nack(requeue=False)`, o que vence por TTL, termina en `camera_dlq` con el header `x-death` (motivo y cola de origen).
+  - **Si cambiás `definitions.json`**, recreá el broker sin su volumen; si no, queda la topología vieja: `docker compose rm -sfv camera-queue && docker compose up -d camera-queue`. Si al arrancar falla con `.erlang.cookie: eacces`, repetí el mismo comando.
+  - Los servicios **no declaran** estas colas con argumentos propios (usan `queue_declare(passive=True)`): la topología vive solo en `definitions.json`.
 - **Logs Queue (`logs-queue` - RabbitMQ Container 2)**:
   - **Ports**: Host `5673` $\rightarrow$ Container `5672` (AMQP), Host `15673` $\rightarrow$ Container `15672` (Management UI — `guest` / `guest`)
   - **Pre-configured Queue** (in `infrastructure/logs-queue/definitions.json`): `logs_queue`
@@ -40,6 +43,54 @@ Every component in this repository is isolated in its own container and configur
 
 ---
 
+## 2.1 Contrato del mensaje en `camera_processing_queue`
+
+El `edge-processor` publica **un mensaje por clip** y el `cv-module` lo consume. El clip en sí no viaja por la cola: se guarda en MinIO (bucket `clips`), y el mensaje solo lleva la metadata y la clave del objeto (patrón *claim check*).
+
+**Cuerpo** (JSON en UTF-8, un objeto por mensaje):
+
+| Campo | Tipo | Descripción |
+| :--- | :--- | :--- |
+| `clip_id` | string (UUID v4) | Identificador único del clip. Es la **clave de idempotencia**: la entrega es *at-least-once*, así que el mismo `clip_id` puede llegar más de una vez y el resultado se guarda una sola vez. |
+| `trace_id` | string | Igual a `clip_id`. Sirve para seguir el clip en los logs de todos los servicios. |
+| `camera_id` | string | ID de la cámara (ej. `cam-1`). Tiene que existir en la tabla `cameras`. |
+| `intersection_id` | string | ID de la intersección (ej. `int-1`). Tiene que existir en la tabla `intersections`. |
+| `timestamp` | string (ISO 8601, UTC, sufijo `Z`) | Momento de captura del clip, no de publicación. |
+| `object_key` | string | Clave del clip en el bucket `CLIPS_BUCKET_NAME`, con formato `{camera_id}/{clip_id}.npy`. El nombre del bucket sale de la configuración, no del mensaje. |
+| `frames` | int | Cantidad de frames del clip, después de descartar los que no cambiaron. |
+| `shape` | [int, int] | `[alto, ancho]` de cada frame, después de reducir la resolución. |
+
+El objeto `.npy` es un único arreglo NumPy `uint8` con forma `(frames, alto, ancho)`.
+
+Ejemplo:
+
+```json
+{
+  "clip_id": "3f2b8c1e-9a4d-4e7b-8f10-2c6d5a9e1b07",
+  "trace_id": "3f2b8c1e-9a4d-4e7b-8f10-2c6d5a9e1b07",
+  "camera_id": "cam-1",
+  "intersection_id": "int-1",
+  "timestamp": "2026-11-15T14:03:22.123Z",
+  "object_key": "cam-1/3f2b8c1e-9a4d-4e7b-8f10-2c6d5a9e1b07.npy",
+  "frames": 8,
+  "shape": [120, 160]
+}
+```
+
+**Publicación:** default exchange (`""`) con `routing_key = camera_processing_queue`.
+
+**Propiedades AMQP:**
+
+| Propiedad | Valor | Para qué |
+| :--- | :--- | :--- |
+| `delivery_mode` | `2` | Mensaje persistente. Junto con la cola `durable`, sobrevive a un reinicio del broker. |
+| `content_type` | `application/json` | Indica cómo decodificar el cuerpo. |
+| `message_id` | `clip_id` | Permite ver el clip en el panel de RabbitMQ y en la DLQ sin abrir el cuerpo. |
+
+**Consumo:** ACK manual. El worker confirma recién después de guardar el resultado.
+
+---
+
 ## 3. How to Run
 
 ### Run Locally (All-in-One via Docker Compose)
@@ -48,7 +99,15 @@ Every component in this repository is isolated in its own container and configur
    ```bash
    docker compose up --build
    ```
-3. **Stop the system**:
+3. **Escalar los workers de CV** (competing consumers sobre `camera_processing_queue`):
+   ```bash
+   docker compose up -d --scale cv-module=3
+   ```
+   `cv-module` no publica puerto en el host. Para consultar el `/health` de una réplica:
+   ```bash
+   docker compose exec --index 2 cv-module python -c "import urllib.request;print(urllib.request.urlopen('http://localhost:8002/health').read().decode())"
+   ```
+4. **Stop the system**:
    ```bash
    docker compose down
    ```

@@ -149,9 +149,8 @@ services:
 
   cv-module:
     build: ./cv-module
-    container_name: cv-module
-    ports:
-      - "${CV_MODULE_PORT:-8002}:8002"
+    # Sin container_name ni ports: se escala con `docker compose up --scale cv-module=N`.
+    # Los demás servicios lo alcanzan por DNS interno en http://cv-module:8002.
     environment:
       SERVICE_NAME: cv-module
       SERVICE_PORT: 8002
