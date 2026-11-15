@@ -20,12 +20,42 @@
       "read": ".*"
     }
   ],
+  "exchanges": [
+    {
+      "name": "dlx",
+      "vhost": "/",
+      "type": "fanout",
+      "durable": true,
+      "auto_delete": false,
+      "internal": false,
+      "arguments": {}
+    }
+  ],
   "queues": [
     {
       "name": "camera_processing_queue",
       "vhost": "/",
       "durable": true,
       "auto_delete": false,
+      "arguments": {
+        "x-dead-letter-exchange": "dlx"
+      }
+    },
+    {
+      "name": "camera_dlq",
+      "vhost": "/",
+      "durable": true,
+      "auto_delete": false,
+      "arguments": {}
+    }
+  ],
+  "bindings": [
+    {
+      "source": "dlx",
+      "vhost": "/",
+      "destination": "camera_dlq",
+      "destination_type": "queue",
+      "routing_key": "",
       "arguments": {}
     }
   ]
