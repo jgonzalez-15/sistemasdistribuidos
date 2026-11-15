@@ -31,18 +31,30 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   const [simulationMode, setSimulationMode] = useState<'normal' | 'concurrent_congestion'>('normal');
   const [refreshCounter, setRefreshCounter] = useState<number>(0);
   const [isAutoBatchActive, setIsAutoBatchActive] = useState<boolean>(false);
+  const [dataSource, setDataSource] = useState<'bff-live' | 'bff-mock-fallback'>('bff-mock-fallback');
 
-  const loadDashboardData = async () => {
-    setIsLoading(true);
-    const response = await fetchIntersectionsFromBff();
+  const loadDashboardData = useCallback(async (forceLive = false) => {
+    const response = await fetchIntersectionsFromBff({ forceLive });
     setIntersections(response.data);
+    setDataSource(response.source);
     setLastSyncTime(new Date().toLocaleTimeString());
     setIsLoading(false);
-  };
+  }, []);
 
   useEffect(() => {
-    loadDashboardData();
-  }, []);
+    loadDashboardData(true);
+  }, [loadDashboardData]);
+
+  // Live polling from real backend every 5s when connected and not paused
+  useEffect(() => {
+    if (isFaultTolerantDemoMode || dataSource !== 'bff-live') return;
+    const pollId = window.setInterval(() => {
+      void loadDashboardData(false).then(() => {
+        setRefreshCounter((c) => c + 1);
+      });
+    }, 5000);
+    return () => window.clearInterval(pollId);
+  }, [isFaultTolerantDemoMode, dataSource, loadDashboardData]);
 
   const handleTriggerConcurrentCongestion = () => {
     const updated = triggerConcurrentCongestionSimulation();
@@ -53,20 +65,32 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   };
 
   const handleResetNormal = () => {
-    const updated = resetNormalTrafficSimulation();
-    setIntersections(updated);
     setSimulationMode('normal');
-    setLastSyncTime(new Date().toLocaleTimeString());
-    setRefreshCounter((c) => c + 1);
+    if (dataSource !== 'bff-live') {
+      const updated = resetNormalTrafficSimulation();
+      setIntersections(updated);
+      setLastSyncTime(new Date().toLocaleTimeString());
+      setRefreshCounter((c) => c + 1);
+      return;
+    }
+    void loadDashboardData(true).then(() => {
+      setRefreshCounter((c) => c + 1);
+    });
   };
 
   const handleSimulateBatch = useCallback(() => {
     if (isFaultTolerantDemoMode) return;
+    if (dataSource === 'bff-live') {
+      void loadDashboardData(true).then(() => {
+        setRefreshCounter((c) => c + 1);
+      });
+      return;
+    }
     const updated = simulateNextWorkerBatchUpdate();
     setIntersections(updated);
     setLastSyncTime(new Date().toLocaleTimeString());
     setRefreshCounter((c) => c + 1);
-  }, [isFaultTolerantDemoMode]);
+  }, [isFaultTolerantDemoMode, dataSource, loadDashboardData]);
 
   useEffect(() => {
     if (isFaultTolerantDemoMode && isAutoBatchActive) {

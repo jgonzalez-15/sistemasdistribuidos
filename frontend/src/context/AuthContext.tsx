@@ -1,9 +1,9 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { LoginCredentials, UserSession } from '../types/traffic';
 import {
-  clearSession,
   getStoredSession,
   loginWithBff,
+  logoutFromBff,
 } from '../services/bffApi';
 
 interface AuthContextValue {
@@ -50,7 +50,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   const logout = () => {
-    clearSession();
+    void logoutFromBff();
     setSession(null);
     setError(null);
   };
