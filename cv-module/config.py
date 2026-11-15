@@ -38,3 +38,15 @@ CLIPS_BUCKET_NAME = os.getenv("CLIPS_BUCKET_NAME", "clips")
 EDGE_PROCESSOR_URL = os.getenv("EDGE_PROCESSOR_URL", "http://edge-processor:8001")
 VISUALIZATION_BACKEND_URL = os.getenv("VISUALIZATION_BACKEND_URL", "http://visualization-backend:8003")
 API_REST_URL = os.getenv("API_REST_URL", "http://api-rest:8000")
+
+# Detector simulado (CV): un píxel con valor > DETECTION_THRESHOLD se considera "vehículo",
+# y se descartan las manchas con menos de MIN_BLOB_AREA píxeles (ruido).
+DETECTION_THRESHOLD = int(os.getenv("DETECTION_THRESHOLD", "128"))
+MIN_BLOB_AREA = int(os.getenv("MIN_BLOB_AREA", "4"))
+
+# Demora artificial (milisegundos) por clip, solo para las demos: con 0 el worker procesa tan rápido
+# que la cola nunca se llena; con, por ejemplo, 2000 se ve cómo la cola baja más rápido al pasar
+# de 1 a 3 réplicas (`docker compose up --scale cv-module=3`). En uso normal dejarla en 0.
+# Debe quedar bastante por debajo del heartbeat de RabbitMQ (60 s), porque durante la espera
+# el hilo no atiende la conexión.
+PROCESSING_DELAY_MS = int(os.getenv("PROCESSING_DELAY_MS", "0"))
