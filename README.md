@@ -114,7 +114,8 @@ docker compose run -d -e CAMERA_RANGE=101-200 edge-processor
 | `MIN_BLOB_AREA` | `4` | Descarta manchas chicas (ruido). |
 | `PROCESSING_DELAY_MS` | `0` | Demora artificial por clip, **solo para la demo de escalado**. Representa el costo de un modelo real. |
 
-**Eventos de log** (JSON en una línea, a stdout): `clip_published`, `clip_processed`, `clip_failed`, `clip_dead_lettered`, `worker_started`, `worker_stopped`, `edge_lagging`, `broker_connect_retry`, `publish_retry` y `worker_reconnecting`.
+**Logs** (JSON en una línea, con el formato `ts`, `service`, `level`, `event`, `trace_id`, `clip_id`, `duration_ms`, `message` y campos extra): cada evento sale por **stdout** y se publica en **`logs_queue`** (broker `logs-queue`) desde un hilo aparte. Si `logs-queue` se cae, los servicios siguen funcionando: los registros esperan en memoria (hasta 10 000) y se envían al reconectar.
+Eventos: `clip_published`, `clip_processed`, `clip_failed`, `clip_dead_lettered`, `worker_started`, `worker_stopped`, `edge_lagging`, `broker_connect_retry`, `publish_retry`, `worker_reconnecting` y `logs_dropped`. El aviso interno `log_shipper_retry` va solo a stdout.
 
 > Si el puerto 8001 del host está ocupado: `EDGE_PROCESSOR_PORT=18001 docker compose up -d`.
 

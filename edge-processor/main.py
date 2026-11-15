@@ -4,6 +4,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 
 import config
+import logs
 from edge import run_edge_threads
 
 stop_event = threading.Event()
@@ -19,6 +20,7 @@ async def lifespan(app: FastAPI):
     stop_event.set()
     for t in threads:
         t.join(timeout=5)
+    logs.flush()        # publicar en logs_queue los últimos eventos (worker_stopped)
 
 
 app = FastAPI(title="Edge Processor", lifespan=lifespan)

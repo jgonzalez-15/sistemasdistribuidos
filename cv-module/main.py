@@ -3,6 +3,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 
 import config
+import logs
 from worker import Worker
 
 worker = None
@@ -18,6 +19,7 @@ async def lifespan(app: FastAPI):
     # Al apagar (docker stop manda SIGTERM → uvicorn → acá): apagado ordenado del worker.
     worker.stop()
     worker.join(timeout=10)
+    logs.flush()        # publicar en logs_queue los últimos eventos (worker_stopped)
 
 
 app = FastAPI(title="Computer Vision Module", lifespan=lifespan)

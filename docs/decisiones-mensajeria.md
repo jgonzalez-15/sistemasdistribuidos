@@ -116,6 +116,22 @@ Cada decisión registra:
 - **Por qué el diseño ya lo soporta:** reenviar clips viejos no duplica nada, porque `clip_id` hace idempotente el guardado (D3), y un clip que llega tarde queda en su lugar del histórico porque `ts` es el momento de captura (D12). Agregarlo sería un directorio de pendientes en un volumen y un hilo que lo vacía al recuperarse la conexión.
 - **Alternativa descartada (por ahora):** implementarlo. Exige manejar el disco del edge (cuota y qué descartar si se llena) y absorber la ráfaga de clips viejos al recuperarse. Por tiempo se priorizaron los logs (punto 7) y las demos (punto 8).
 
+## D15. Logs a stdout y a `logs_queue`, con envío asíncrono y cola en memoria acotada
+- **Por qué:** stdout es el flujo de eventos del proceso (12-Factor XI), y `logs_queue` alimenta el `monitoring-pipeline` de Ro, que calcula las métricas. Si se publicara en el mismo hilo que procesa clips, una caída de `logs-queue` frenaría el producto. Por eso `log_event` solo imprime y deja el registro en una cola en memoria; un hilo aparte (`log-shipper`) la vacía publicando en RabbitMQ. **La observabilidad no puede tirar abajo el producto.**
+- **Fuente:** Tema 7 p.3 y p.8–10 (pilar logs, JSON). Tema 2.0 p.18 (XI, logs como flujo de eventos a stdout). Tema 4.4 (cola). EDA-AWS p.9 (seguir un evento entre servicios, por eso viaja `trace_id`). El envío asíncrono con cola acotada es **[FUERA DE CLASE]**.
+- **Probado** (evidencias 06 y 07): stdout y la cola coinciden exactamente (81 = 81). Con `logs-queue` caído 30 s, los clips se siguieron guardando sin errores, y al volver el shipper reconectó solo sin perder ningún log (329 = 329).
+- **Trade-off aceptado:**
+  - Los logs llegan a la cola con milisegundos de atraso.
+  - Si la caída es larga y se llenan los 10 000 registros en memoria, **se descartan los nuevos** (se avisa con `logs_dropped`): las métricas de Ro quedan bajas en ese período, aunque stdout los conserva.
+  - Los logs no usan publisher confirms (envío con el mejor esfuerzo, a diferencia de los clips).
+  - Si el proceso muere, se pierde lo que estaba en memoria sin enviar; al apagar con orden, `flush()` espera hasta 3 s.
+  - `logs.py` queda duplicado en edge y worker, porque cada servicio es una imagen aparte.
+- **Cómo afecta:**
+  - **Ro** consume `logs_queue` con el formato del punto 6 más campos extra.
+  - Mientras no haya consumidor, `logs_queue` crece sin límite (en la prueba: ~330 mensajes en 2 minutos). Se sugiere `x-max-length` o un TTL en `infrastructure/logs-queue/definitions.json`, que es de Ro.
+  - Los avisos internos del shipper (`log_shipper_retry`) salen solo por stdout.
+- **Alternativa descartada:** publicar en el mismo hilo, que es más simple pero acopla el procesamiento a la disponibilidad de `logs-queue`. También se descartó un agente externo que lea stdout (Fluent Bit/Filebeat): no hay que tocar el código, pero suma otro contenedor y su configuración.
+
 ## D13. `PROCESSING_DELAY_MS`: demora artificial opcional en el worker
 - **Por qué:** el CV simulado es tan rápido (milisegundos) que un solo worker vacía la cola y en la demo no se ve la diferencia entre 1 y 3 workers. Con una demora de, por ejemplo, 500 ms, la cola crece con 1 worker y baja con 3.
 - **Fuente:** decisión para la demo (Tema 1.2 p.21, escalar para repartir la carga).
