@@ -402,5 +402,10 @@ def create_intersection(body: IntersectionCreateBody):
         raise HTTPException(status_code=500, detail=f"Results DB error: {e}")
 
 
+# Clips por minuto desde la Metrics DB (solo lectura).
+from metricas_pipeline import router as metricas_pipeline_router  # noqa: E402
+app.include_router(metricas_pipeline_router)
+
+
 # Métricas de negocio para Prometheus (reusa los umbrales de compute_congestion_level).
 metrics.registrar_negocio(compute_congestion_level)

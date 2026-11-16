@@ -229,6 +229,12 @@ services:
       SERVICE_NAME: visualization-backend
       SERVICE_PORT: 8003
       METRICS_ENABLED: ${METRICS_ENABLED:-true}   # GET /metrics para Prometheus
+      # Lectura de la Metrics DB (GET /pipeline/clips-per-minute)
+      METRICS_DB_HOST: ${METRICS_DB_HOST:-metrics-db}
+      METRICS_DB_PORT: 5432
+      METRICS_DB_NAME: ${METRICS_DB_NAME:-metrics_db}
+      METRICS_DB_USER: ${METRICS_DB_USER:-postgres}
+      METRICS_DB_PASS: ${METRICS_DB_PASS:-postgres}
       LOGS_QUEUE_HOST: ${LOGS_QUEUE_HOST:-logs-queue}
       LOGS_QUEUE_PORT: 5672
       LOGS_QUEUE_USER: ${LOGS_QUEUE_USER:-guest}
