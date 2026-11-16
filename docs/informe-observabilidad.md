@@ -27,11 +27,12 @@ El stack es **opt-in** (`docker compose --profile observability up -d --build`).
 | Latencia extremo a extremo | p95 ≈ 0,2 s en reposo; ≈ 22 s durante la demo de worker caído (3 s por clip). |
 | Drenado de `logs_queue` | 37 925 mensajes acumulados sin consumidor → 0 en ~30 s al arrancar el pipeline; 43 718 logs procesados, 0 inválidos, 0 descartados, 0 errores de push a Loki. |
 | Metrics DB | ~72 clips/min con 6 cámaras (= 6 × 60/5), p95 de `duration_ms` 214–416 ms. |
-| Alerta worker caído | `docker compose stop cv-module` → *Sin workers de CV* y *Cola sin consumidores* en Firing y en el webhook a los 92 s; resueltas 56 s después de volver a arrancarlo. |
+| Alerta worker caído (2 corridas) | `docker compose stop cv-module` → *Sin workers de CV* y *camera_processing_queue sin consumidores* (críticas) en Firing y notificadas al webhook a los 92 s y a los 88 s; con `docker compose start cv-module` pasaron a *resolved* a los 56 s y a los 58 s. |
 | Alerta DLQ | `demo_dlq.sh` → la alerta por métrica (RabbitMQ) y la alerta por **logs** (LogQL `clip_dead_lettered`) llegaron al webhook a los 13 s. |
 | Alerta real encontrada | La alerta de memoria detectó a Grafana al 90 % de su límite de 384 MB (se subió a 512 MB). |
 | Validación de consultas | 58 consultas PromQL y 17 LogQL de los dashboards validadas contra las APIs: 0 errores. |
 | Costo en RAM del stack F1 | Prometheus ~100 MB; blackbox, cAdvisor, canary y exporters ~17–27 MB cada uno (cAdvisor). |
+| Verificador | `scripts/verify_observabilidad.sh`: **45 OK, 0 fallas** (targets UP con 3 réplicas, Grafana provisionada, Loki con logs de los 5 servicios, `logs_queue` con policy y drenada, emitidos == recibidos: 144 `clip_published` en stdout = 144 en Loki en una ventana de 2 min). |
 | Fail-safe | Con `METRICS_ENABLED=false`, `/metrics` da 404 y `/health` 200 en todos los servicios. Sin Loki, el pipeline sigue consumiendo (ACK siempre). |
 
 ## 4. Tabla de pruebas (continúa la existente)
@@ -41,9 +42,10 @@ El stack es **opt-in** (`docker compose --profile observability up -d --build`).
 | P10 | Línea base intacta con observabilidad | Las 4 demos y la prueba de carga pasan con el perfil encendido después de F1, F2 y F3 (escalado 239/227/226; worker caído 54 = 54 y 132 = 132; DLQ con `x-death`; idempotencia 1 fila). | `scripts/demo_*.sh`, `prueba_carga.sh` |
 | P11 | Sistema base sin el perfil | `demo_idempotencia` y `demo_dlq` pasan con el stack de observabilidad detenido. | `docker compose stop <servicios del perfil>` |
 | P12 | Descubrimiento de réplicas | 3 réplicas → 3 targets UP y 3 probes OK. | `--scale cv-module=3` + Prometheus Targets |
-| P13 | Alerta de worker caído y resolución | Firing a los 92 s; resolved a los 56 s. | `docker compose stop/start cv-module` |
+| P13 | Alerta de worker caído y resolución | Firing a los 92 s / 88 s; resolved a los 56 s / 58 s (2 corridas). | `docker compose stop/start cv-module` |
 | P14 | Alertas de DLQ por métrica y por logs | Ambas en el webhook a los 13 s. | `demo_dlq.sh` + `docker logs alert-receiver` |
 | P15 | Pipeline drena `logs_queue` | 37 925 → 0 en ~30 s. | `rabbitmqctl list_queues` |
+| P17 | Verificación automática de la observabilidad | 45 OK, 0 fallas. | `scripts/verify_observabilidad.sh` |
 | P16 | Contadores visibles desde el primer fallo | Antes del arreglo (O12), `increase()` no veía la DLQ; después, `failed` = 1 en `download`. | `demo_dlq.sh` + PromQL |
 
 ## 5. Mini-relato de incidente (monitoreo → observabilidad)
@@ -64,9 +66,9 @@ El stack es **opt-in** (`docker compose --profile observability up -d --build`).
 - **AOD:** el *Monitoring Metrics Pipeline* y la *Metrics DB*, que estaban punteados, pasan a implementados. Se agregan Prometheus, Grafana, Loki, blackbox, exporters, canary y alert-receiver.
 
 ## 7. Limitaciones y trabajo futuro (honesto)
-- **Trazas distribuidas (OpenTelemetry → Collector → Jaeger, F4): código escrito pero NO probado ni commiteado.** Queda como trabajo futuro, junto con el salto log ↔ traza y el mapa de dependencias.
-- **No hechos:** `demo_observabilidad.sh` (demo guiada de las 4 alertas), la medición del costo de la instrumentación (carga con y sin el perfil, una corrida detrás de la otra), la prueba de clon limpio, el verificador ejecutado de punta a punta (`scripts/verify_observabilidad.sh` está escrito pero no se corrió), y los bonus (Alertmanager, SLO, exemplars, k6).
-- **Prueba de carga:** en este equipo el throughput varió entre corridas (~63 publ/s en la línea base, ~35 publ/s en la corrida de F2) con el host saturado (load average ~450, `com.docker.backend` ~370 % de CPU, también fuera de las pruebas). No se puede atribuir la diferencia a la instrumentación sin una medición A/B.
+- **Trazas distribuidas (OpenTelemetry → Collector → Jaeger, F4): trabajo futuro.** El código está en la rama `wip/trazas` (commit `8133931`), sin probar y sin integrar. Los logs ya llevan `trace_hex` (= `clip_id` sin guiones) para enlazarlos con las trazas cuando se integre.
+- **No hechos:** `demo_observabilidad.sh` (demo guiada de las 4 alertas), la medición del costo de la instrumentación (carga con y sin el perfil, una corrida detrás de la otra), la prueba de clon limpio y los bonus (Alertmanager, SLO, exemplars, k6).
+- **Prueba de carga — resultado NO CONCLUYENTE:** el throughput fue ~63 clips/s en la línea base (sin observabilidad) y ~35 clips/s en la corrida de F2, pero el host estaba saturado (load average ~450, `com.docker.backend` ~370 % de CPU incluso sin pruebas corriendo). Por eso la diferencia **no** se atribuye a la instrumentación. En todas las corridas hubo 0 clips fallidos y la cola se vació al escalar. La prueba de carga de F3 se interrumpió sin terminar. Medir el costo exige una corrida A/B (con y sin el perfil, una detrás de la otra) en un host sin saturar.
 - Las zonas extra del edge (`docker compose run`) no se descubren por DNS (O7).
 - cAdvisor no está probado en Windows.
 - MinIO sin retención. Prometheus 3 días y Loki 48 h (pensado para laptops).
