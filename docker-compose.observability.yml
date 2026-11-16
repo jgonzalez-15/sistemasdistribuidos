@@ -55,7 +55,9 @@ services:
       - ./observability/grafana/dashboards:/var/lib/grafana/dashboards:ro
       - grafana_data:/var/lib/grafana
     # 384m no alcanzó: la propia alerta de memoria (> 85 %) lo detectó con ~345 MB en uso.
-    mem_limit: 512m
+    # 512m tampoco: Grafana 13 usa ~550 MB con los 4 dashboards y las 22 reglas; contra el límite
+    # se quedaba al ~1000 % de CPU (recolección de memoria) y los paneles no cargaban. Con 1g baja a ~1 %.
+    mem_limit: 1g
     restart: unless-stopped
     networks:
       - distributed_net

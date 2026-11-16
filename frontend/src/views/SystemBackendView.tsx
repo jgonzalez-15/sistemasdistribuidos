@@ -4,6 +4,7 @@ import {
   Gauge,
   Pause,
   Play,
+  Radar,
   Send,
   ShieldAlert,
   Terminal,
@@ -39,7 +40,15 @@ type NodeId =
   | 'cv-module'
   | 'results-db'
   | 'logs-queue'
-  | 'monitoring-pipeline';
+  | 'monitoring-pipeline'
+  // Vista de observabilidad (opt-in, perfil `observability`)
+  | 'exporters'
+  | 'prometheus'
+  | 'grafana'
+  | 'loki'
+  | 'metrics-db'
+  | 'canary'
+  | 'alert-receiver';
 
 type NodeKind = 'client' | 'service' | 'broker' | 'database' | 'object-store';
 type LogSource = 'ALL' | 'API-REST' | 'AUTH-SERVICE' | 'EDGE-PROC' | 'CV-MODULE' | 'RABBITMQ' | 'MONITORING';
@@ -433,7 +442,255 @@ const DIAGRAM_LINKS: DiagramLinkSpec[] = [
   },
 ];
 
-const NODE_MAP: Record<NodeId, DiagramNodeSpec> = DIAGRAM_NODES.reduce((acc, n) => {
+/**
+ * Vista de observabilidad (botón "Vista Observabilidad"): agrega el PLANO 04 debajo del diagrama base,
+ * sin mover ni cruzar ninguno de los nodos y cables de los planos 01–03.
+ * - Fila 4a (y=672): [exporters] ---> [prometheus] ---> [grafana] <--- [loki]      [metrics-db]
+ * - Fila 4b (y=782): [canary] ----------^              [alert-receiver]
+ * Prometheus scrapea /metrics de los 6 servicios Python además de los exporters (30 targets).
+ */
+const OBS_COLOR = '#EC4899';
+const OBS_NODES: DiagramNodeSpec[] = [
+  {
+    id: 'exporters',
+    title: 'Exporters & Probes',
+    container: 'blackbox + exporters',
+    port: ':9115',
+    kind: 'service',
+    zone: 'OBSERVABILITY · COLLECTORS',
+    tech: 'Blackbox · RMQ · PG ×3 · MinIO',
+    role: 'Probes HTTP/TCP de /health de cada servicio y réplica, exporters de PostgreSQL (×3), métricas por cola de RabbitMQ y de MinIO (cAdvisor opcional)',
+    cx: 135,
+    cy: 672,
+  },
+  {
+    id: 'prometheus',
+    title: 'Prometheus',
+    container: 'prometheus',
+    port: ':9090',
+    kind: 'database',
+    zone: 'OBSERVABILITY · MÉTRICAS',
+    tech: 'Prometheus · scrape 15 s',
+    role: 'Scrapea /metrics de los 6 servicios Python, exporters y canary (30 targets). Descubre cada réplica de cv-module por DNS',
+    url: 'http://localhost:9090',
+    cx: 395,
+    cy: 672,
+  },
+  {
+    id: 'grafana',
+    title: 'Grafana',
+    container: 'grafana',
+    port: ':3001',
+    kind: 'client',
+    zone: 'OBSERVABILITY · VISUALIZACIÓN',
+    tech: 'Grafana · 4 dashboards',
+    role: 'Dashboards provisionados (Salud técnica, Pipeline, Tránsito, Logs) y 22 reglas de alerta con runbook',
+    url: GRAFANA_URL,
+    cx: 660,
+    cy: 672,
+  },
+  {
+    id: 'loki',
+    title: 'Loki',
+    container: 'loki',
+    port: ':3100',
+    kind: 'database',
+    zone: 'OBSERVABILITY · LOGS',
+    tech: 'Loki · LogQL · 48 h',
+    role: 'Almacena los logs JSON que envía el monitoring-pipeline (validados, enmascarados y enriquecidos)',
+    cx: 925,
+    cy: 672,
+  },
+  {
+    id: 'metrics-db',
+    title: 'Metrics Database',
+    container: 'metrics-db',
+    port: ':5435',
+    kind: 'database',
+    zone: 'OBSERVABILITY · AGREGADOS',
+    tech: 'PostgreSQL 16 (metrics_db)',
+    role: 'Agregados por minuto calculados desde los logs (clips/min, p95 de duration_ms). La lee visualization-backend',
+    cx: 1185,
+    cy: 672,
+  },
+  {
+    id: 'canary',
+    title: 'Canary (sintético)',
+    container: 'canary',
+    port: ':9101',
+    kind: 'service',
+    zone: 'OBSERVABILITY · MONITOREO SINTÉTICO',
+    tech: 'Python · Requests',
+    role: 'Cada 30 s recorre el camino de un usuario real: login → intersecciones → health → logout',
+    cx: 135,
+    cy: 782,
+  },
+  {
+    id: 'alert-receiver',
+    title: 'Alert Receiver',
+    container: 'alert-receiver',
+    port: 'webhook',
+    kind: 'service',
+    zone: 'OBSERVABILITY · ALERTAS',
+    tech: 'Python · Webhook',
+    role: 'Contact point de Grafana: recibe las alertas en Firing y Resolved',
+    cx: 660,
+    cy: 782,
+  },
+];
+
+const OBS_LINKS: DiagramLinkSpec[] = [
+  {
+    id: 'exporters->prometheus',
+    from: 'exporters',
+    to: 'prometheus',
+    protocol: 'SCRAPE',
+    color: OBS_COLOR,
+    points: [
+      [237, 672],
+      [293, 672],
+    ],
+    labelPos: [265, 655],
+  },
+  {
+    id: 'canary->prometheus',
+    from: 'canary',
+    to: 'prometheus',
+    protocol: 'SCRAPE :9101',
+    color: OBS_COLOR,
+    points: [
+      [237, 782],
+      [395, 782],
+      [395, 714],
+    ],
+    labelPos: [316, 770],
+  },
+  {
+    id: 'canary->api-rest',
+    from: 'canary',
+    to: 'api-rest',
+    protocol: 'HTTP CANARY · LOGIN c/30 s',
+    color: '#3B82F6',
+    points: [
+      [33, 782],
+      [9, 782],
+      [9, -10],
+      [640, -10],
+      [640, 50],
+    ],
+    labelPos: [325, -15],
+  },
+  {
+    id: 'prometheus->grafana',
+    from: 'prometheus',
+    to: 'grafana',
+    protocol: 'PromQL',
+    color: OBS_COLOR,
+    points: [
+      [497, 672],
+      [558, 672],
+    ],
+    labelPos: [527, 655],
+  },
+  {
+    id: 'loki->grafana',
+    from: 'loki',
+    to: 'grafana',
+    protocol: 'LogQL',
+    color: OBS_COLOR,
+    points: [
+      [823, 672],
+      [762, 672],
+    ],
+    labelPos: [792, 655],
+  },
+  {
+    id: 'grafana->alert-receiver',
+    from: 'grafana',
+    to: 'alert-receiver',
+    protocol: 'WEBHOOK',
+    color: '#EF4444',
+    points: [
+      [660, 714],
+      [660, 740],
+    ],
+    labelPos: [702, 731],
+  },
+  {
+    id: 'monitoring-pipeline->loki',
+    from: 'monitoring-pipeline',
+    to: 'loki',
+    protocol: 'PUSH LOGS',
+    color: '#F59E0B',
+    points: [
+      [1000, 540],
+      [1000, 630],
+    ],
+    labelPos: [954, 589],
+  },
+  {
+    id: 'monitoring-pipeline->metrics-db',
+    from: 'monitoring-pipeline',
+    to: 'metrics-db',
+    protocol: 'SQL /min',
+    color: '#10B981',
+    points: [
+      [1130, 540],
+      [1130, 630],
+    ],
+    labelPos: [1088, 589],
+  },
+  {
+    id: 'metrics-db->visualization-backend',
+    from: 'metrics-db',
+    to: 'visualization-backend',
+    protocol: 'SQL CLIPS/MIN',
+    color: '#3B82F6',
+    points: [
+      [1262, 630],
+      [1262, 337],
+    ],
+    labelPos: [1218, 400],
+  },
+];
+
+/** Dashboards de Grafana relacionados con cada nodo (botones en el inspector). */
+interface GrafanaLink {
+  label: string;
+  path: string;
+}
+const DASH = {
+  pipeline: { label: 'Pipeline de procesamiento', path: '/d/sgtu-pipeline/?orgId=1&from=now-15m&to=now' },
+  salud: { label: 'Salud técnica', path: '/d/sgtu-salud/?orgId=1&from=now-15m&to=now' },
+  transito: { label: 'Tránsito', path: '/d/sgtu-transito/?orgId=1&from=now-15m&to=now' },
+  logs: { label: 'Logs', path: '/d/sgtu-logs/?orgId=1&from=now-15m&to=now' },
+} satisfies Record<string, GrafanaLink>;
+const NODE_GRAFANA_LINKS: Record<NodeId, GrafanaLink[]> = {
+  frontend: [DASH.transito],
+  'api-rest': [DASH.salud],
+  'auth-service': [DASH.salud],
+  'auth-db': [DASH.salud],
+  'edge-processor': [DASH.pipeline, DASH.salud],
+  'camera-queue': [DASH.pipeline],
+  'cv-module': [DASH.pipeline, DASH.logs],
+  'results-db': [DASH.transito, DASH.salud],
+  'visualization-backend': [DASH.transito],
+  'clips-db': [DASH.pipeline],
+  'logs-queue': [DASH.logs],
+  'monitoring-pipeline': [DASH.logs, DASH.pipeline],
+  exporters: [DASH.salud],
+  prometheus: [DASH.salud],
+  grafana: [{ label: 'todos (carpeta SGTU)', path: '/dashboards/f/sgtu/?orgId=1' }],
+  loki: [DASH.logs],
+  'metrics-db': [DASH.pipeline],
+  canary: [DASH.salud],
+  'alert-receiver': [{ label: 'reglas de alerta', path: '/alerting/list' }],
+};
+
+const OBS_LINK_IDS = new Set(OBS_LINKS.map((l) => l.id));
+const ALL_LINKS: DiagramLinkSpec[] = [...DIAGRAM_LINKS, ...OBS_LINKS];
+
+const NODE_MAP: Record<NodeId, DiagramNodeSpec> = [...DIAGRAM_NODES, ...OBS_NODES].reduce((acc, n) => {
   acc[n.id] = n;
   return acc;
 }, {} as Record<NodeId, DiagramNodeSpec>);
@@ -497,6 +754,13 @@ export const SystemBackendView: React.FC<SystemBackendViewProps> = ({
   const speedFactor = isSlowMo ? 0.05 : 1.0;
   const speedFactorRef = useRef<number>(speedFactor);
   speedFactorRef.current = speedFactor;
+
+  // Vista de observabilidad (opt-in): suma el PLANO 04 con lo que agrega el perfil `observability`
+  const [isObsView, setIsObsView] = useState<boolean>(false);
+  const isObsViewRef = useRef<boolean>(isObsView);
+  isObsViewRef.current = isObsView;
+  const activeNodes = useMemo(() => (isObsView ? [...DIAGRAM_NODES, ...OBS_NODES] : DIAGRAM_NODES), [isObsView]);
+  const activeLinks = useMemo(() => (isObsView ? ALL_LINKS : DIAGRAM_LINKS), [isObsView]);
 
   const [cameraQueueReady, setCameraQueueReady] = useState<number>(3);
   const [logsQueueReady, setLogsQueueReady] = useState<number>(1);
@@ -615,8 +879,9 @@ export const SystemBackendView: React.FC<SystemBackendViewProps> = ({
 
   const spawnPacket = useCallback(
     (linkId: string, label: string, baseDurationMs = 900, onArrive?: () => void) => {
-      const link = DIAGRAM_LINKS.find((l) => l.id === linkId);
+      const link = ALL_LINKS.find((l) => l.id === linkId);
       if (!link) return;
+      if (OBS_LINK_IDS.has(link.id) && !isObsViewRef.current) return;
       const id = `pkt-${packetSeqRef.current++}`;
 
       if (onArrive) {
@@ -737,6 +1002,12 @@ export const SystemBackendView: React.FC<SystemBackendViewProps> = ({
           );
           spawnPacket('logs-queue->monitoring-pipeline', 'CLIP_PROCESSED', 820, () => {
             pulseNodeProcessing('monitoring-pipeline', 'METRICS OK', 550);
+            spawnPacket('monitoring-pipeline->loki', 'LOG JSON', 820, () => {
+              pulseNodeProcessing('loki', 'INGEST', 500);
+            });
+            spawnPacket('monitoring-pipeline->metrics-db', 'UPSERT /min', 820, () => {
+              pulseNodeProcessing('metrics-db', 'AGREGADO OK', 500);
+            });
           });
         });
       });
@@ -788,6 +1059,58 @@ export const SystemBackendView: React.FC<SystemBackendViewProps> = ({
     });
   }, [pulseNodeProcessing, spawnPacket]);
 
+  // Flow 4 (solo vista de observabilidad): scrape de Prometheus, consultas de Grafana, canary y alertas
+  const triggerObservabilityFlow = useCallback(() => {
+    spawnPacket('exporters->prometheus', 'SCRAPE 30 targets', 900, () => {
+      pulseNodeProcessing('prometheus', 'TSDB WRITE', 550);
+      spawnPacket('prometheus->grafana', 'PromQL', 800, () => {
+        pulseNodeProcessing('grafana', 'DASHBOARD', 550);
+        if (isFaultTolerantDemoMode) {
+          spawnPacket('grafana->alert-receiver', 'ALERTA CRIT', 700, () => {
+            pulseNodeProcessing('alert-receiver', 'FIRING: Sin workers CV', 1400);
+          });
+        }
+      });
+    });
+    spawnPacket('loki->grafana', 'LogQL', 900);
+    spawnPacket('metrics-db->visualization-backend', 'CLIPS/MIN', 1100, () => {
+      pulseNodeProcessing('visualization-backend', 'GET clips-per-minute', 600);
+    });
+  }, [isFaultTolerantDemoMode, pulseNodeProcessing, spawnPacket]);
+
+  const triggerCanaryFlow = useCallback(() => {
+    pulseNodeProcessing('canary', 'LOGIN → HEALTH', 700);
+    spawnPacket('canary->api-rest', 'CANARY LOGIN', 1600, () => {
+      pulseNodeProcessing('api-rest', 'CANARY 200 OK', 600);
+      spawnPacket('canary->prometheus', 'canary_success=1', 900);
+    });
+  }, [pulseNodeProcessing, spawnPacket]);
+
+  useEffect(() => {
+    if (!isObsView || isSimPaused) return;
+    const t0 = window.setTimeout(() => {
+      triggerObservabilityFlow();
+      triggerCanaryFlow();
+    }, 500);
+    let step = 0;
+    const interval = window.setInterval(() => {
+      step += 1;
+      triggerObservabilityFlow();
+      if (step % 3 === 0) triggerCanaryFlow();
+    }, isSlowMo ? 16000 : 3200);
+    return () => {
+      window.clearTimeout(t0);
+      window.clearInterval(interval);
+    };
+  }, [isObsView, isSimPaused, isSlowMo, triggerObservabilityFlow, triggerCanaryFlow]);
+
+  // Al salir de la vista, sacar paquetes de cables que ya no existen y deseleccionar nodos ocultos
+  useEffect(() => {
+    if (isObsView) return;
+    setPackets((prev) => prev.filter((p) => !OBS_LINK_IDS.has(p.linkId)));
+    setSelectedNodeId((id) => (OBS_NODES.some((n) => n.id === id) ? 'cv-module' : id));
+  }, [isObsView]);
+
   // Automatic background orchestration (interval scales with slow-mo so packets don't pile up)
   useEffect(() => {
     if (isSimPaused) return;
@@ -814,16 +1137,16 @@ export const SystemBackendView: React.FC<SystemBackendViewProps> = ({
 
   const linkGeometries = useMemo(
     () =>
-      DIAGRAM_LINKS.map((link) => ({
+      activeLinks.map((link) => ({
         link,
         d: buildPolylineSvgPath(link.points),
       })),
-    []
+    [activeLinks]
   );
 
   const selectedNode = NODE_MAP[selectedNodeId];
-  const inboundLinks = DIAGRAM_LINKS.filter((l) => l.to === selectedNodeId);
-  const outboundLinks = DIAGRAM_LINKS.filter((l) => l.from === selectedNodeId);
+  const inboundLinks = activeLinks.filter((l) => l.to === selectedNodeId);
+  const outboundLinks = activeLinks.filter((l) => l.from === selectedNodeId);
 
   const filteredLogs =
     logFilter === 'ALL' ? logs : logs.filter((entry) => entry.service === logFilter);
@@ -855,7 +1178,21 @@ export const SystemBackendView: React.FC<SystemBackendViewProps> = ({
       case 'logs-queue':
         return `${logsQueueReady} READY · 14.5/s`;
       case 'monitoring-pipeline':
-        return '11/11 NODES WATCHED';
+        return isObsView ? '→ LOKI + METRICS-DB' : '11/11 NODES WATCHED';
+      case 'exporters':
+        return 'PROBES /health · TCP';
+      case 'prometheus':
+        return '30 TARGETS UP';
+      case 'grafana':
+        return '4 DASHBOARDS · 22 ALERTAS';
+      case 'loki':
+        return '0 PUSH ERRORS';
+      case 'metrics-db':
+        return '~72 CLIPS/MIN';
+      case 'canary':
+        return 'CADA 30 s · OK';
+      case 'alert-receiver':
+        return isFaultTolerantDemoMode ? '1 FIRING' : '0 FIRING';
     }
   };
 
@@ -874,18 +1211,17 @@ export const SystemBackendView: React.FC<SystemBackendViewProps> = ({
 
         <div className="sys-subheader-right">
           <ClipsPerMinutePill />
-          <a
-            className="sim-btn"
-            href={`${GRAFANA_URL}/dashboards/f/sgtu/`}
-            target="_blank"
-            rel="noopener noreferrer"
-            id="btn-open-grafana"
-            title="Abrir los dashboards de observabilidad (Grafana: salud, pipeline, tránsito y logs) en otra pestaña"
-            style={{ textDecoration: 'none' }}
+          <button
+            type="button"
+            className={`sim-btn ${isObsView ? 'active' : ''}`}
+            onClick={() => setIsObsView((v) => !v)}
+            id="btn-obs-view"
+            aria-pressed={isObsView}
+            title="Mostrar en el diagrama el stack de observabilidad (Prometheus, Grafana, Loki, metrics-db, exporters, canary y alertas)"
           >
-            <Activity size={13} strokeWidth={1.75} />
-            <span>Observabilidad (Grafana)</span>
-          </a>
+            <Radar size={14} strokeWidth={1.75} />
+            <span>{isObsView ? 'Vista Observabilidad · ON' : 'Vista Observabilidad'}</span>
+          </button>
           <button
             type="button"
             className={`sim-btn ${isSlowMo ? 'active slowmo-active' : ''}`}
@@ -965,6 +1301,11 @@ export const SystemBackendView: React.FC<SystemBackendViewProps> = ({
               <span className="legend-pill">
                 <i style={{ background: '#38BDF8' }} /> MinIO S3 & Telemetría
               </span>
+              {isObsView && (
+                <span className="legend-pill">
+                  <i style={{ background: OBS_COLOR }} /> Observabilidad (scrape · PromQL · LogQL)
+                </span>
+              )}
               {isSlowMo && (
                 <span className="legend-slow-badge">
                   ● CÁMARA LENTA ACTIVA (5% VELOCIDAD) — LECTURA DETALLADA DE PAQUETES
@@ -973,8 +1314,8 @@ export const SystemBackendView: React.FC<SystemBackendViewProps> = ({
             </div>
 
             <svg
-              className="sys-diagram-svg"
-              viewBox="0 0 1320 600"
+              className={`sys-diagram-svg ${isObsView ? 'obs-view' : ''}`}
+              viewBox={isObsView ? '0 -26 1320 890' : '0 0 1320 600'}
               preserveAspectRatio="xMidYMid meet"
               data-testid="deployment-diagram-svg"
             >
@@ -1009,7 +1350,7 @@ export const SystemBackendView: React.FC<SystemBackendViewProps> = ({
               </defs>
 
               {/* Subtle engineering grid background */}
-              <rect width="1320" height="600" fill="url(#sys-grid)" />
+              <rect y={isObsView ? -26 : 0} width="1320" height={isObsView ? 890 : 600} fill="url(#sys-grid)" />
 
               {/* Deployment Tier Swimlanes */}
               <g className="sys-swimlanes">
@@ -1057,6 +1398,25 @@ export const SystemBackendView: React.FC<SystemBackendViewProps> = ({
                 <text x="32" y="444" className="sys-lane-label">
                   PLANO 03 · ALMACENAMIENTO S3 (MINIO) & OBSERVABILIDAD DISTRIBUIDA (RABBITMQ #2 → MONITORING PIPELINE)
                 </text>
+
+                {isObsView && (
+                  <>
+                    <rect
+                      x="18"
+                      y="600"
+                      width="1284"
+                      height="242"
+                      rx="8"
+                      className="sys-swimlane-box"
+                      fill="rgba(236,72,153,0.025)"
+                      stroke="rgba(236,72,153,0.28)"
+                      strokeDasharray="4 6"
+                    />
+                    <text x="32" y="618" className="sys-lane-label">
+                      PLANO 04 · OBSERVABILIDAD (PERFIL observability): MÉTRICAS → PROMETHEUS · LOGS → LOKI · GRAFANA → ALERTAS
+                    </text>
+                  </>
+                )}
               </g>
 
               {/* Directed Planar Connector Paths + Offset Protocol Labels */}
@@ -1169,7 +1529,7 @@ export const SystemBackendView: React.FC<SystemBackendViewProps> = ({
               })}
 
               {/* Component / Container Nodes */}
-              {DIAGRAM_NODES.map((node) => {
+              {activeNodes.map((node) => {
                 const isSelected = node.id === selectedNodeId;
                 const isCvDegraded = isFaultTolerantDemoMode && node.id === 'cv-module';
                 const isQueueRetaining = isFaultTolerantDemoMode && node.id === 'camera-queue';
@@ -1317,9 +1677,11 @@ export const SystemBackendView: React.FC<SystemBackendViewProps> = ({
 
               {/* Animated In-Flight Message Packets (traveling along exact border-to-border polylines) */}
               {packets.map((pkt) => {
-                const link = DIAGRAM_LINKS.find((l) => l.id === pkt.linkId);
+                const link = activeLinks.find((l) => l.id === pkt.linkId);
                 if (!link) return null;
                 const [x, y] = pointAlongPolyline(link.points, pkt.progress);
+                // La etiqueta (104 px) no se sale del lienzo cuando el paquete va pegado a un borde
+                const badgeDx = x - 52 < 4 ? 4 - (x - 52) : x + 52 > 1316 ? 1316 - (x + 52) : 0;
 
                 return (
                   <g
@@ -1330,7 +1692,7 @@ export const SystemBackendView: React.FC<SystemBackendViewProps> = ({
                   >
                     <circle r="5.5" fill={pkt.color} filter="url(#pkt-glow)" />
                     <circle r="2.2" fill="#FAFAFA" />
-                    <g transform="translate(0, 16)">
+                    <g transform={`translate(${badgeDx}, 16)`}>
                       <rect
                         x="-52"
                         y="-9"
@@ -1369,6 +1731,26 @@ export const SystemBackendView: React.FC<SystemBackendViewProps> = ({
             </div>
 
             <p className="sys-inspector-desc">{selectedNode.role}</p>
+
+            <div
+              className="sys-inspector-grafana"
+              style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 8, marginBottom: 12 }}
+            >
+              {NODE_GRAFANA_LINKS[selectedNode.id].map((g) => (
+                <a
+                  key={g.path}
+                  className="sim-btn"
+                  href={`${GRAFANA_URL}${g.path}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  title="Abre Grafana en otra pestaña (perfil observability)"
+                  style={{ textDecoration: 'none' }}
+                >
+                  <Activity size={13} strokeWidth={1.75} />
+                  <span>Ver en Grafana: {g.label} ↗</span>
+                </a>
+              ))}
+            </div>
 
             <div className="sys-inspector-kv">
               <div>

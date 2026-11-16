@@ -1958,6 +1958,11 @@ code {
   user-select: none;
 }
 
+/* Vista de observabilidad: el diagrama suma el PLANO 04 y necesita más alto */
+.sys-diagram-svg.obs-view {
+  max-height: 860px;
+}
+
 .sys-lane-label {
   font-family: var(--font-mono);
   font-size: 9.5px;

@@ -324,6 +324,7 @@
         <div class="row" style="gap:24px"><div class="bubble sm b-fluid"><i class="ic" data-i="workflow"></i></div><h3 style="font-size:34px">Pipeline completo de clips</h3></div>
         <div class="row" style="gap:24px"><div class="bubble sm b-fluid"><i class="ic" data-i="shield-check"></i></div><h3 style="font-size:34px">Autenticación y roles</h3></div>
         <div class="row" style="gap:24px"><div class="bubble sm b-fluid"><i class="ic" data-i="map"></i></div><h3 style="font-size:34px">Mapa en tiempo real</h3></div>
+        <div class="row" style="gap:24px"><div class="bubble sm b-fluid"><i class="ic" data-i="radar"></i></div><h3 style="font-size:34px">Métricas, logs y alertas</h3></div>
         <div class="row" style="gap:24px"><div class="bubble sm b-fluid"><i class="ic" data-i="terminal"></i></div><h3 style="font-size:34px">Demos reproducibles</h3></div>
       </div>
       <div class="card rv" style="--i:3; padding:44px; display:flex; flex-direction:column; gap:30px; background:var(--elevated)">
@@ -375,7 +376,7 @@
       <div class="card tile frag"><div class="bubble sm b-mod"><i class="ic" data-i="split"></i></div><h3>Concurrencia</h3><div class="tag">competing consumers</div></div>
       <div class="card tile frag"><div class="bubble sm b-fluid"><i class="ic" data-i="copy-check"></i></div><h3>Consistencia</h3><div class="tag">idempotencia por clip_id</div></div>
       <div class="card tile frag"><div class="bubble sm b-sky"><i class="ic" data-i="eye"></i></div><h3>Transparencia</h3><div class="tag">un único BFF</div></div>
-      <div class="card tile frag"><div class="bubble sm b-vio"><i class="ic" data-i="lock"></i></div><h3>Seguridad</h3><div class="tag">tokens con expiración · roles</div></div>
+      <div class="card tile frag"><div class="bubble sm b-vio"><i class="ic" data-i="lock"></i></div><h3>Seguridad</h3><div class="tag">JWT · roles · hash PBKDF2</div></div>
       <div class="card tile frag"><div class="bubble sm b-gray"><i class="ic" data-i="plug"></i></div><h3>Apertura</h3><div class="tag">contrato JSON documentado</div></div>
       <div class="card tile frag"><div class="bubble sm b-gray"><i class="ic" data-i="container"></i></div><h3>Heterogeneidad</h3><div class="tag">Python + TS en contenedores</div></div>
     </div>
@@ -395,7 +396,7 @@
         <span><i style="background:#0284c7"></i>S3</span>
       </div>
     </div>
-    <h2 class="rv" style="--i:1; font-size:64px">12 contenedores, 3 planos</h2>
+    <h2 class="rv" style="--i:1; font-size:64px">El sistema base, en 3 planos</h2>
     <div class="body rv" style="--i:2; margin-top:34px">
       <svg class="diagram" id="arch" viewBox="0 0 1680 760" preserveAspectRatio="xMidYMid meet"></svg>
     </div>
@@ -616,12 +617,43 @@
     <div class="row rv" style="--i:4; gap:16px; margin-top:20px">
       <span class="chip c-fluid"><i class="ic" data-i="circle-check"></i>stdout + logs_queue</span>
       <span class="chip c-fluid"><i class="ic" data-i="circle-check"></i>envío asíncrono</span>
-      <span class="chip c-mod"><i class="ic" data-i="clock"></i>métricas y dashboards: en curso</span>
+      <span class="chip c-fluid"><i class="ic" data-i="circle-check"></i>monitoring-pipeline → Loki + metrics-db</span>
     </div>
   </div>
 </section>
 
-<!-- 21 · CONCLUSIÓN -->
+<!-- 21 · OBSERVABILIDAD: PILARES -->
+<section class="slide" data-arcs="tr:log">
+  <div class="content">
+    <div class="cat rv" style="--i:0"><i class="ic" data-i="radar"></i>Observabilidad · Monitoreo → observabilidad</div>
+    <h2 class="rv" style="--i:1">Del qué falla al por qué</h2>
+    <div class="body" style="gap:64px">
+      <div class="grid eq" style="grid-template-columns:repeat(4,1fr); gap:28px">
+        <div class="card tile rv" style="--i:2"><div class="bubble sm"><i class="ic" data-i="chart-line"></i></div><h3>Métricas</h3><div class="tag">Prometheus · 30 targets</div></div>
+        <div class="card tile rv" style="--i:3"><div class="bubble sm b-vio"><i class="ic" data-i="scroll-text"></i></div><h3>Logs</h3><div class="tag">Loki · LogQL</div></div>
+        <div class="card tile rv" style="--i:4"><div class="bubble sm b-fluid"><i class="ic" data-i="layout-dashboard"></i></div><h3>Dashboards</h3><div class="tag">Grafana · 4 por público</div></div>
+        <div class="card tile rv" style="--i:5"><div class="bubble sm b-crit"><i class="ic" data-i="bell-ring"></i></div><h3>Alertas</h3><div class="tag">22 reglas · canary</div></div>
+      </div>
+      <div class="grid rv" style="--i:6; grid-template-columns:repeat(3,1fr); gap:28px">
+        <div class="row" style="gap:22px"><div class="big" style="font-size:80px">~90 s</div><h3 style="font-size:30px; color:var(--text-2)">worker caído<br>→ alerta</h3></div>
+        <div class="row" style="gap:22px"><div class="big" style="font-size:80px">13 s</div><h3 style="font-size:30px; color:var(--text-2)">clip a la DLQ<br>→ alerta</h3></div>
+        <div class="row" style="gap:22px"><div class="big" style="font-size:80px">45/45</div><h3 style="font-size:30px; color:var(--text-2)">chequeos del<br>verificador</h3></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- 22 · PRODUCTO: GRAFANA -->
+<section class="slide" data-arcs="">
+  <div class="content">
+    <div class="cat rv" style="--i:0"><i class="ic" data-i="layout-dashboard"></i>Observabilidad · Grafana</div>
+    <div class="body rv" style="--i:1; margin-top:36px; display:flex; justify-content:center">
+      <div class="shot" style="width:1560px"><img src="img/grafana-pipeline.png" alt="Dashboard de Grafana del pipeline de clips"></div>
+    </div>
+  </div>
+</section>
+
+<!-- 23 · CONCLUSIÓN -->
 <section class="slide" data-arcs="br:.npy">
   <div class="content">
     <div class="cat rv" style="--i:0"><i class="ic" data-i="flag"></i>Conclusión</div>
@@ -633,12 +665,12 @@
     </div>
     <div class="rv" style="--i:5; display:flex; flex-wrap:wrap; gap:14px; align-items:center; max-width:1250px">
       <span class="label" style="margin-right:10px">Trabajo futuro</span>
-      <span class="chip">CV real</span><span class="chip">store-and-forward</span><span class="chip">reintentos antes de DLQ</span><span class="chip">retención en MinIO</span><span class="chip">Prometheus · Grafana</span>
+      <span class="chip">CV real</span><span class="chip">store-and-forward</span><span class="chip">reintentos antes de DLQ</span><span class="chip">retención en MinIO</span><span class="chip">trazas con OpenTelemetry</span>
     </div>
   </div>
 </section>
 
-<!-- 22 · PREGUNTAS -->
+<!-- 24 · PREGUNTAS -->
 <section class="slide" data-arcs="midtr:.npy,tl:ACK">
   <div class="content" style="justify-content:center">
     <div class="lights rv" style="--i:0"><span style="background:var(--critical)"></span><span style="background:var(--moderate)"></span><span style="background:var(--fluid)"></span></div>
