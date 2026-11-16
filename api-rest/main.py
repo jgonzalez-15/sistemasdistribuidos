@@ -457,6 +457,21 @@ def get_intersection_history(
     )
 
 
+@app.get("/api/pipeline/clips-per-minute")
+def get_clips_per_minute(
+    minutes: int = Query(default=15, ge=1, le=240),
+    session_data: dict = Depends(require_user),
+):
+    """Frontend BFF endpoint: clips processed per minute (Metrics DB, via visualization-backend)."""
+    session_id = session_data.get("session_id")
+    return request_visualization_backend(
+        endpoint="/pipeline/clips-per-minute",
+        method="GET",
+        session_id=session_id,
+        params={"minutes": minutes},
+    )
+
+
 @app.get("/api/cameras")
 def list_cameras(session_data: dict = Depends(require_user)):
     session_id = session_data.get("session_id")
