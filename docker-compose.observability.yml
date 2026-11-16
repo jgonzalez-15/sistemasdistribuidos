@@ -5,7 +5,7 @@
 #   docker compose --profile observability --profile cadvisor up -d   # + CPU/memoria por contenedor
 #
 # Puertos publicados en el host (configurables por env; el resto queda solo en la red interna):
-#   Prometheus ${PROMETHEUS_PORT:-9090}
+#   Prometheus ${PROMETHEUS_PORT:-9090} · Grafana ${GRAFANA_PORT:-3001}
 # Versiones fijas (verificadas en las releases oficiales el 2026-11-15). mem_limit y retención
 # corta pensados para laptops.
 
@@ -27,6 +27,43 @@ services:
       - ./observability/prometheus/rules:/etc/prometheus/rules:ro
       - prometheus_data:/prometheus
     mem_limit: 512m
+    restart: unless-stopped
+    networks:
+      - distributed_net
+
+  # Visualización + alerting, 100 % provisionado desde observability/grafana (sin clicks).
+  # Puerto 3001 en el host: el 3000 es del frontend.
+  grafana:
+    image: grafana/grafana:13.3.1
+    container_name: grafana
+    profiles: ["observability"]
+    ports:
+      - "${GRAFANA_PORT:-3001}:3000"
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_ANALYTICS_REPORTING_ENABLED: "false"
+      GF_ANALYTICS_CHECK_FOR_UPDATES: "false"
+      GF_ANALYTICS_CHECK_FOR_PLUGIN_UPDATES: "false"
+      GF_NEWS_NEWS_FEED_ENABLED: "false"
+      GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /var/lib/grafana/dashboards/salud.json
+      ALERT_WEBHOOK_URL: ${ALERT_WEBHOOK_URL:-http://alert-receiver:8080/alert}
+    volumes:
+      - ./observability/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./observability/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana_data:/var/lib/grafana
+    mem_limit: 384m
+    restart: unless-stopped
+    networks:
+      - distributed_net
+
+  # Contact point de las alertas: imprime cada notificación (docker logs -f alert-receiver).
+  alert-receiver:
+    build: ./observability/alert-receiver
+    container_name: alert-receiver
+    profiles: ["observability"]
+    mem_limit: 32m
     restart: unless-stopped
     networks:
       - distributed_net
@@ -118,3 +155,4 @@ networks:
 
 volumes:
   prometheus_data:
+  grafana_data:

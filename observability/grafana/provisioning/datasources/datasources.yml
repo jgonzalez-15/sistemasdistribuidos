@@ -1,0 +1,15 @@
+# Datasources de Grafana (provisionados: no se crean a mano). Los uid son fijos porque
+# los dashboards y las reglas de alerta los referencian.
+apiVersion: 1
+
+datasources:
+  - name: Prometheus
+    uid: prometheus
+    type: prometheus
+    access: proxy
+    url: http://prometheus:9090
+    isDefault: true
+    editable: false
+    jsonData:
+      timeInterval: 15s
+

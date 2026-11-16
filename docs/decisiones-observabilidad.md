@@ -6,7 +6,7 @@ Formato igual que D1–D17: motivo, costo aceptado y alternativa descartada.
 
 Principio rector (heredado de D15): **la observabilidad no puede tirar abajo el producto.**
 
-Estado: **F1 (métricas) implementada.** F2–F5 en curso; las decisiones de esas fases se agregan al cerrarlas.
+Estado: F1 (métricas) y F2 (Grafana y alertas) implementadas. F3–F5: las decisiones se agregan al cerrar cada fase.
 
 ---
 
@@ -78,3 +78,34 @@ Estado: **F1 (métricas) implementada.** F2–F5 en curso; las decisiones de esa
 ## Hallazgos sobre los scripts existentes (sin modificarlos)
 - `scripts/demo_worker_caido.sh` mata siempre `<proyecto>-cv-module-1`. Si en una corrida anterior esa réplica fue eliminada y después se escaló, Compose numera las nuevas desde el número libre siguiente (-3, -4…) y el script termina con `Error: No such object`. **No depende de la observabilidad:** pasa en cualquier segunda corrida. Se resuelve recreando los workers antes de la demo (`docker compose rm -sf cv-module && docker compose up -d cv-module`). Se le avisa a quien mantiene el script; una mejora sería elegir la víctima con `docker compose ps -q cv-module | head -1`.
 - En este equipo (macOS Intel, Docker Desktop, 8 CPU / 8 GB para Docker), `prueba_carga.sh` registra rondas atrasadas del edge (`edge_lagging`): 131 en la línea base, **sin** el stack de observabilidad. D17 reporta 0 en otra máquina: es una característica del hardware, no un efecto de la instrumentación.
+
+## O13. Grafana 100 % provisionada, dashboards generados por código
+- **Qué:** datasources, dashboards, reglas de alerta, contact point y política de notificación se cargan desde `observability/grafana/provisioning` al arrancar. Los dashboards y las reglas los genera `observability/grafana/generar.py` (Python estándar) y se versionan los JSON resultantes.
+- **Por qué:** cero clicks: cualquier compañero obtiene los mismos dashboards con `up`. Un generador evita cientos de líneas de JSON repetido y permite revisar las consultas en un solo lugar.
+- **Verificado:** las 58 consultas de los dashboards se validaron contra la API de Prometheus (0 errores de sintaxis). Grafana 13 exige `__panelId__` si se usa `__dashboardUid__` en una regla, así que las reglas llevan una anotación `dashboard` con el link directo.
+- **Costo aceptado:** los dashboards no se editan desde la UI (`allowUiUpdates: false`). Para cambiarlos hay que editar el generador; esto evita que el repo y la UI diverjan.
+- **Alternativa descartada:** crear los dashboards en la UI y exportarlos. No es reproducible ni revisable.
+
+## O14. Tres dashboards por público
+- **Salud técnica** (operación): probes, réplicas, canary, RED de la API con un panel de ejemplo de PromQL (`rate(...[5m])` + `histogram_quantile`), upstreams, logins, recursos y conexiones a las bases.
+- **Pipeline de procesamiento** (desarrollo): publicados vs procesados, cola (listos, sin ACK, consumidores), DLQ, tiempo estimado para vaciar la cola, latencia extremo a extremo p50/p95/p99, etapas, duplicados, reentregas, reparto por réplica y edge.
+- **Tránsito** (negocio): estado por intersección con la misma regla y colores del dashboard web, historia del estado, cámaras sin datos y tamaño del bucket.
+- **Anotaciones:** las alertas de Grafana y un "cambio de réplicas de cv-module" calculado con PromQL. Las anotaciones desde logs se agregan en F3.
+
+## O15. Alerting de Grafana con pending period, severidad y runbook
+- **Qué:** 18 reglas en 3 grupos (Críticas, Advertencias, Negocio). Cada una tiene umbral, *pending period* (`for`), label `severity`, `summary`, `description`, `runbook` (qué mirar primero) y link al dashboard.
+- **Umbrales y por qué:**
+  - Probe o target caído > 1 min.
+  - Sin workers o cola sin consumidores (crítica, 30 s / 1 min).
+  - Backlog > 100 listos durante 2 min: con 1 worker y demora artificial la cola crece ~2,5 msg/s (D17), así que 100 se supera en ~40 s.
+  - DLQ: cualquier mensaje nuevo en 5 min.
+  - Cámara sin resultados > 120 s (24 intervalos de 5 s).
+  - Latencia extremo a extremo p95 > 30 s durante 5 min (normal medido: ~0,2 s; en la demo de worker caído llegó a 22 s).
+  - API: 5xx > 5 % y p95 > 2 s.
+  - PostgreSQL: caído o conexiones > 80 %.
+  - Bucket > 5 GB.
+  - Memoria de contenedor > 85 % de su `mem_limit`.
+  - Congestión sostenida > 10 min (info).
+- **Contact point:** webhook a `alert-receiver`, que imprime cada notificación (`docker logs -f alert-receiver`). La URL es configurable (`ALERT_WEBHOOK_URL`): sirve para Slack, Discord o cualquier webhook propio sin cambiar código.
+- **Verificado:** con `docker compose stop cv-module`, *Sin workers de CV* y *camera_processing_queue sin consumidores* pasaron a Firing a los 92 s y llegaron al webhook. Al volver a arrancarlo se resolvieron (notificación `resolved`) a los 56 s.
+- **Alternativa descartada (por ahora):** Alertmanager con reglas en Prometheus. El curso muestra el alerting de Grafana (contact point, pending period, UI unificada) y además permite alertas sobre logs (LogQL) en el mismo lugar. Alertmanager queda como bonus.
