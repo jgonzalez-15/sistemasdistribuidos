@@ -1,0 +1,191 @@
+# Stack de observabilidad del SGTU (opt-in). Se incluye desde docker-compose.yml con `include:`,
+# pero todos los servicios están en el perfil `observability`: un `docker compose up` normal NO los levanta.
+#
+#   docker compose --profile observability up -d --build          # sistema + observabilidad
+#   docker compose --profile observability --profile cadvisor up -d   # + CPU/memoria por contenedor
+#
+# Puertos publicados en el host (configurables por env; el resto queda solo en la red interna):
+#   Prometheus ${PROMETHEUS_PORT:-9090} · Grafana ${GRAFANA_PORT:-3001} · Loki ${LOKI_PORT:-3100}
+# Versiones fijas (verificadas en las releases oficiales el 2026-11-15). mem_limit y retención
+# corta pensados para laptops.
+
+services:
+  prometheus:
+    image: prom/prometheus:v3.16.0
+    container_name: prometheus
+    profiles: ["observability"]
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=${PROMETHEUS_RETENTION:-3d}
+      - --storage.tsdb.retention.size=${PROMETHEUS_RETENTION_SIZE:-1GB}
+      - --web.enable-lifecycle
+    ports:
+      - "${PROMETHEUS_PORT:-9090}:9090"
+    volumes:
+      - ./observability/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./observability/prometheus/rules:/etc/prometheus/rules:ro
+      - prometheus_data:/prometheus
+    mem_limit: 512m
+    restart: unless-stopped
+    networks:
+      - distributed_net
+
+  # Visualización + alerting, 100 % provisionado desde observability/grafana (sin clicks).
+  # Puerto 3001 en el host: el 3000 es del frontend.
+  grafana:
+    image: grafana/grafana:13.3.1
+    container_name: grafana
+    profiles: ["observability"]
+    ports:
+      - "${GRAFANA_PORT:-3001}:3000"
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_ANALYTICS_REPORTING_ENABLED: "false"
+      GF_ANALYTICS_CHECK_FOR_UPDATES: "false"
+      GF_ANALYTICS_CHECK_FOR_PLUGIN_UPDATES: "false"
+      GF_NEWS_NEWS_FEED_ENABLED: "false"
+      GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /var/lib/grafana/dashboards/salud.json
+      ALERT_WEBHOOK_URL: ${ALERT_WEBHOOK_URL:-http://alert-receiver:8080/alert}
+    volumes:
+      - ./observability/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./observability/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana_data:/var/lib/grafana
+    # 384m no alcanzó: la propia alerta de memoria (> 85 %) lo detectó con ~345 MB en uso.
+    mem_limit: 512m
+    restart: unless-stopped
+    networks:
+      - distributed_net
+
+  # Logs centralizados (LogQL). Los recibe por push del monitoring-pipeline. Retención 48 h.
+  loki:
+    image: grafana/loki:3.7.10
+    container_name: loki
+    profiles: ["observability"]
+    command: ["-config.file=/etc/loki/loki.yml", "-config.expand-env=true"]
+    ports:
+      - "${LOKI_PORT:-3100}:3100"
+    environment:
+      LOKI_RETENTION: ${LOKI_RETENTION:-48h}
+    volumes:
+      - ./observability/loki/loki.yml:/etc/loki/loki.yml:ro
+      - loki_data:/loki
+    mem_limit: 384m
+    restart: unless-stopped
+    networks:
+      - distributed_net
+
+  # Contact point de las alertas: imprime cada notificación (docker logs -f alert-receiver).
+  alert-receiver:
+    build: ./observability/alert-receiver
+    container_name: alert-receiver
+    profiles: ["observability"]
+    mem_limit: 32m
+    restart: unless-stopped
+    networks:
+      - distributed_net
+
+  blackbox:
+    image: prom/blackbox-exporter:v0.29.1
+    container_name: blackbox
+    profiles: ["observability"]
+    command: ["--config.file=/etc/blackbox/blackbox.yml"]
+    volumes:
+      - ./observability/blackbox/blackbox.yml:/etc/blackbox/blackbox.yml:ro
+    mem_limit: 64m
+    restart: unless-stopped
+    networks:
+      - distributed_net
+
+  pg-exporter-results:
+    image: prometheuscommunity/postgres-exporter:v0.20.1
+    container_name: pg-exporter-results
+    profiles: ["observability"]
+    environment:
+      DATA_SOURCE_URI: "${RESULTS_DB_HOST:-results-db}:5432/${RESULTS_DB_NAME:-results_db}?sslmode=disable"
+      DATA_SOURCE_USER: ${RESULTS_DB_USER:-postgres}
+      DATA_SOURCE_PASS: ${RESULTS_DB_PASS:-postgres}
+    mem_limit: 64m
+    restart: unless-stopped
+    networks:
+      - distributed_net
+
+  pg-exporter-metrics:
+    image: prometheuscommunity/postgres-exporter:v0.20.1
+    container_name: pg-exporter-metrics
+    profiles: ["observability"]
+    environment:
+      DATA_SOURCE_URI: "${METRICS_DB_HOST:-metrics-db}:5432/${METRICS_DB_NAME:-metrics_db}?sslmode=disable"
+      DATA_SOURCE_USER: ${METRICS_DB_USER:-postgres}
+      DATA_SOURCE_PASS: ${METRICS_DB_PASS:-postgres}
+    mem_limit: 64m
+    restart: unless-stopped
+    networks:
+      - distributed_net
+
+  pg-exporter-auth:
+    image: prometheuscommunity/postgres-exporter:v0.20.1
+    container_name: pg-exporter-auth
+    profiles: ["observability"]
+    environment:
+      DATA_SOURCE_URI: "${AUTH_DB_HOST:-auth-db}:5432/${AUTH_DB_NAME:-auth_db}?sslmode=disable"
+      DATA_SOURCE_USER: ${AUTH_DB_USER:-postgres}
+      DATA_SOURCE_PASS: ${AUTH_DB_PASS:-postgres}
+    mem_limit: 64m
+    restart: unless-stopped
+    networks:
+      - distributed_net
+
+  # Monitoreo sintético: login + /api/intersections + /api/system/health + logout cada 30 s.
+  canary:
+    build: ./observability/canary
+    container_name: canary
+    profiles: ["observability"]
+    environment:
+      CANARY_API_URL: ${API_REST_URL:-http://api-rest:8000}
+      CANARY_USER: ${CANARY_USER:-admin}
+      CANARY_PASSWORD: ${CANARY_PASSWORD:-admin123}
+      CANARY_INTERVAL_S: ${CANARY_INTERVAL_S:-30}
+    mem_limit: 64m
+    restart: unless-stopped
+    networks:
+      - distributed_net
+
+  # CPU/memoria por contenedor. OPCIONAL (perfil `cadvisor`): depende de cómo cada SO expone
+  # los cgroups de Docker (probado en Docker Desktop para macOS; en Windows puede no funcionar).
+  cadvisor:
+    image: ghcr.io/google/cadvisor:v0.60.6
+    container_name: cadvisor
+    profiles: ["cadvisor"]
+    privileged: true
+    command:
+      - --docker_only=true
+      - --housekeeping_interval=15s
+      - --store_container_labels=false
+      - --whitelisted_container_labels=com.docker.compose.service,com.docker.compose.project
+      - --disable_metrics=advtcp,cpu_topology,cpuset,hugetlb,memory_numa,percpu,process,referenced_memory,resctrl,sched,tcp,udp,disk,diskIO
+    volumes:
+      - /:/rootfs:ro
+      # Socket de Docker (solo lectura de metadatos: nombres/labels de contenedores). Docker Desktop
+      # redirige este path al socket de su VM; montar /var/run entero trae el directorio de macOS.
+      # Ojo: acceso al socket = control del daemon; por eso cAdvisor es opt-in y no publica puerto.
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      # cAdvisor >= 0.5x lee los contenedores de Docker a través de containerd.
+      - /run/containerd/containerd.sock:/run/containerd/containerd.sock:ro
+      - /sys:/sys:ro
+      - /var/lib/docker/:/var/lib/docker:ro
+    mem_limit: 256m
+    restart: unless-stopped
+    networks:
+      - distributed_net
+
+networks:
+  distributed_net:
+    driver: bridge
+
+volumes:
+  prometheus_data:
+  grafana_data:
+  loki_data:

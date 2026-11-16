@@ -1,0 +1,28 @@
+# Módulos de blackbox_exporter usados por Prometheus (jobs blackbox-*).
+modules:
+  # /health de los servicios: HTTP 200 y "status": "ok" en el cuerpo.
+  http_health:
+    prober: http
+    timeout: 5s
+    http:
+      preferred_ip_protocol: ip4
+      valid_status_codes: [200]
+      fail_if_body_not_matches_regexp:
+        - '"status"\s*:\s*"ok"'
+
+  # Frontend (servidor de Vite): solo tiene que responder 2xx. Vite rechaza (403) hosts que no
+  # conoce, por eso el probe se presenta como localhost en vez de cambiar la config del frontend.
+  http_2xx:
+    prober: http
+    timeout: 5s
+    http:
+      preferred_ip_protocol: ip4
+      headers:
+        Host: localhost:3000
+
+  # Bases de datos y brokers: el puerto acepta conexiones.
+  tcp_connect:
+    prober: tcp
+    timeout: 5s
+    tcp:
+      preferred_ip_protocol: ip4

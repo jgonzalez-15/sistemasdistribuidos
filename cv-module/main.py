@@ -4,6 +4,7 @@ from fastapi import FastAPI
 
 import config
 import logs
+import observability
 from worker import Worker
 
 worker = None
@@ -23,6 +24,7 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="Computer Vision Module", lifespan=lifespan)
+observability.setup(app)                         # GET /metrics + RED de HTTP
 
 
 @app.get("/health")

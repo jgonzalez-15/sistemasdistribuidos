@@ -15,7 +15,7 @@ import socket
 import threading
 import time
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 
 import numpy as np
 import pika
@@ -23,6 +23,7 @@ import pika.exceptions
 
 import config
 import db
+import metrics
 import storage
 from detector import Detector, DetectorSimulado
 from logs import log_event
@@ -90,6 +91,8 @@ class Worker(threading.Thread):
         self._parar = threading.Event()
         self._conexion = None
         self._canal = None
+        metrics.INFO.labels(self.processed_by).set(1)
+        metrics.CONSUMER_UP.set_function(lambda: 1 if self.consuming else 0)
 
     # ---------- Conexión y ciclo de vida ----------
 
@@ -141,6 +144,7 @@ class Worker(threading.Thread):
                 # AMQPError incluye AMQPConnectionError, ConnectionClosedByBroker, StreamLostError y
                 # errores de canal. OSError cubre fallas de red/DNS (ej. el broker todavía no arrancó).
                 if not self._parar.is_set():
+                    metrics.BROKER_RECONNECTS.inc()
                     log_event("worker_reconnecting", level="WARNING", processed_by=self.processed_by,
                               error=repr(e), retry_in_s=espera,
                               message=f"sin conexión con {config.CAMERA_QUEUE_HOST}, reintento en {espera} s")
@@ -188,13 +192,19 @@ class Worker(threading.Thread):
             clip_id = msg["clip_id"]
             trace_id = msg["trace_id"]
 
+            if method.redelivered:
+                metrics.REDELIVERED.inc()
+
             # (b) Bajar el clip de MinIO (claim check).
+            t_etapa = time.monotonic()
             try:
                 clip = storage.download_clip(msg["object_key"])
             except Exception as e:
                 raise ErrorEnEtapa("download", e)
+            metrics.STAGE_DURATION.labels("download").observe(time.monotonic() - t_etapa)
 
             # (c) Contar vehículos en cada frame y resumir el clip con la mediana.
+            t_etapa = time.monotonic()
             try:
                 conteos = [self.detector.contar(frame) for frame in clip]
                 vehicle_count = mediana_redondeada(conteos)
@@ -202,8 +212,10 @@ class Worker(threading.Thread):
                 raise ErrorEnEtapa("detect", e)
             if config.PROCESSING_DELAY_MS > 0:
                 time.sleep(config.PROCESSING_DELAY_MS / 1000)  # solo para la demo de escalado
+            metrics.STAGE_DURATION.labels("detect").observe(time.monotonic() - t_etapa)
 
             # (d) Guardar el resultado (idempotente).
+            t_etapa = time.monotonic()
             try:
                 insertado = db.save_result(
                     clip_id=clip_id,
@@ -216,18 +228,22 @@ class Worker(threading.Thread):
                 )
             except Exception as e:
                 raise ErrorEnEtapa("db", e)
+            metrics.STAGE_DURATION.labels("db").observe(time.monotonic() - t_etapa)
 
         except ErrorEnEtapa as fallo:
             # Hoy todo fallo va directo a la DLQ. Mejora futura (extra 2): reintentar N veces
             # con un contador en un header antes de mandarlo a la DLQ.
             if trace_id is None:
                 trace_id = _trace_id_si_se_puede(body)
+            metrics.CLIPS.labels("failed").inc()
+            metrics.FAILURES.labels(fallo.etapa).inc()
             log_event("clip_failed", level="ERROR", trace_id=trace_id, clip_id=clip_id,
                       duration_ms=(time.monotonic() - t0) * 1000,
                       stage=fallo.etapa, error=repr(fallo.error), processed_by=self.processed_by,
                       message=f"falló el clip en la etapa {fallo.etapa}")
             # requeue=False: RabbitMQ lo manda al dead-letter exchange (dlx) → cola camera_dlq.
             ch.basic_nack(delivery_tag=method.delivery_tag, requeue=False)
+            metrics.CLIPS.labels("dead_lettered").inc()
             log_event("clip_dead_lettered", level="WARNING", trace_id=trace_id, clip_id=clip_id,
                       stage=fallo.etapa, processed_by=self.processed_by,
                       message="mensaje enviado a camera_dlq")
@@ -235,6 +251,10 @@ class Worker(threading.Thread):
 
         # (e) Recién ahora, con el resultado guardado, se confirma el mensaje.
         ch.basic_ack(delivery_tag=method.delivery_tag)
+        metrics.CLIPS.labels("ok" if insertado else "duplicate").inc()
+        metrics.VEHICLES.observe(vehicle_count)
+        if insertado:
+            _observar_latencia(msg["ts"])
 
         # (f) Log del resultado.
         log_event("clip_processed", trace_id=trace_id, clip_id=clip_id,
@@ -247,6 +267,21 @@ class Worker(threading.Thread):
                   redelivered=bool(method.redelivered),
                   message="clip ya procesado antes (duplicado, no se insertó)" if not insertado
                   else f"clip procesado: {vehicle_count} vehículos")
+
+
+def _observar_latencia(ts_captura):
+    """Latencia extremo a extremo: reloj del worker menos el timestamp de captura del edge.
+
+    En Compose comparten el reloj del host. En un despliegue real habría deriva entre relojes
+    (se mitiga con NTP); por eso el diseño distingue `ts` (captura, reloj del edge) de
+    `processed_at` (reloj de la base), ver D12.
+    """
+    try:
+        if ts_captura.tzinfo is None:
+            ts_captura = ts_captura.replace(tzinfo=timezone.utc)
+        metrics.END_TO_END.observe(max(0.0, (datetime.now(timezone.utc) - ts_captura).total_seconds()))
+    except Exception:
+        pass
 
 
 def _trace_id_si_se_puede(body):

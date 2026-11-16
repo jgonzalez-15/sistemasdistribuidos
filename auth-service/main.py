@@ -8,8 +8,11 @@ from psycopg2.extras import RealDictCursor
 import uuid
 import secrets
 import config
+import metrics  # noqa: F401  (registra auth_login_total y auth_active_sessions)
+import observability
 
 app = FastAPI(title="Auth Service")
+observability.setup(app)                         # GET /metrics + RED de HTTP
 
 app.add_middleware(
     CORSMiddleware,

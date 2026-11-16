@@ -180,3 +180,36 @@ docker compose exec results-db psql -U postgres -d results_db -c "DELETE FROM re
 | Sección 2.1 de este README | Contrato del mensaje en `camera_processing_queue`. |
 | Sección 2.2 de este README | Configuración del edge y del worker, y eventos de log. |
 | Sección 4 de este README | Demos reproducibles (`scripts/`). |
+
+---
+
+## 6. Observabilidad (perfil opcional)
+
+El stack de observabilidad es **opt-in**: `docker compose up` levanta solo el sistema base, igual que antes. Decisiones en `docs/decisiones-observabilidad.md` (O1…On).
+
+**Prerrequisitos:** Docker Compose ≥ 2.20 (usa `include:`). RAM recomendada para Docker: 6–8 GB con el perfil activo.
+
+```bash
+docker compose --profile observability up -d --build                      # sistema + observabilidad
+docker compose --profile observability --profile cadvisor up -d --build   # + CPU/memoria por contenedor (opcional)
+docker compose --profile observability down                               # sin -v: conserva los datos
+```
+
+| Herramienta | URL | Notas |
+| :--- | :--- | :--- |
+| Prometheus | http://localhost:9090 (`PROMETHEUS_PORT`) | *Status → Targets*: todos los servicios, cada réplica de `cv-module`, exporters y probes. Retención 3 días. |
+| Grafana | http://localhost:3001 (`GRAFANA_PORT`) | Usuario `admin` / `admin` (dev, `GRAFANA_ADMIN_*`). Carpeta **SGTU**: dashboards *Salud técnica*, *Pipeline de procesamiento* y *Tránsito*; *Alerting → Alert rules*: 18+ reglas. Todo provisionado desde `observability/grafana/` (sin clicks). |
+| Loki | http://localhost:3100 (`LOKI_PORT`) | Logs de todos los servicios (vía monitoring-pipeline). Consultar desde Grafana → *Explore* o el dashboard *SGTU · Logs*, p. ej. `{service="cv-module", event="clip_failed"} \| json`. Retención 48 h. |
+| Metrics DB | `localhost:5435` (`postgres`/`postgres`) | Agregados por minuto: `docker compose exec metrics-db psql -U postgres -d metrics_db -c 'SELECT * FROM metrics_minute ORDER BY minute DESC LIMIT 5'`. Es parte del sistema base. |
+| Alertas recibidas | `docker logs -f alert-receiver` | Contact point webhook: imprime cada alerta *firing* / *resolved*. |
+| `/metrics` de cada servicio | p. ej. http://localhost:8000/metrics | Se apaga con `METRICS_ENABLED=false`. |
+
+Servicios del perfil (solo red interna, sin puerto en el host): `blackbox` (probes de `/health` y TCP a bases y brokers), `pg-exporter-results`, `pg-exporter-auth`, `canary` (monitoreo sintético cada 30 s) y, con el perfil `cadvisor`, `cadvisor`. Los brokers exponen métricas con el plugin `rabbitmq_prometheus` (puerto interno 15692).
+
+Dashboards y reglas se generan con `python3 observability/grafana/generar.py` (se versionan los JSON generados; Grafana los recarga solo cada 30 s).
+
+Variables nuevas (todas con default de desarrollo, ver `.env.example`): `GRAFANA_PORT`, `GRAFANA_ADMIN_USER`, `GRAFANA_ADMIN_PASSWORD`, `ALERT_WEBHOOK_URL`, `METRICS_ENABLED`, `MINIO_PROMETHEUS_AUTH_TYPE`, `PROMETHEUS_PORT`, `PROMETHEUS_RETENTION`, `PROMETHEUS_RETENTION_SIZE`, `CANARY_USER`, `CANARY_PASSWORD`, `CANARY_INTERVAL_S`, `AUTH_METRICS_CACHE_S`, `VIZ_METRICS_CACHE_S`.
+
+> cAdvisor es opcional porque depende de cómo cada SO expone los sockets de Docker: probado en Docker Desktop para macOS; en Windows puede no funcionar.
+
+**`logs_queue` acotada** (policy `logs-queue-limites`: 50 000 mensajes, descarta los más viejos, TTL 24 h). Si el broker ya estaba levantado antes de este cambio: `docker compose restart logs-queue` (recarga `definitions.json` sin borrar la cola).
