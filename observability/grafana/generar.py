@@ -46,7 +46,7 @@ def ts(title, targets, x, y, w=12, h=8, unit="short", desc="", stack=False, thre
     if thresholds:
         fc["thresholds"] = {"mode": "absolute", "steps": thresholds}
         fc["custom"]["thresholdsStyle"] = {"mode": "line+area"}
-    return {"id": _nid(), "type": "timeseries", "title": title, "description": desc, "datasource": PROM,
+    return {"id": _nid(), "type": "timeseries", "title": title, "description": desc, "datasource": targets[0]["datasource"],
             "gridPos": {"x": x, "y": y, "w": w, "h": h}, "targets": targets,
             "fieldConfig": {"defaults": fc, "overrides": []},
             "options": {"legend": {"displayMode": "table", "placement": "bottom", "calcs": ["lastNotNull", "max"]},
@@ -54,7 +54,7 @@ def ts(title, targets, x, y, w=12, h=8, unit="short", desc="", stack=False, thre
 
 
 def stat(title, targets, x, y, w=4, h=4, unit="short", desc="", mappings=None, steps=None, color_mode="background"):
-    return {"id": _nid(), "type": "stat", "title": title, "description": desc, "datasource": PROM,
+    return {"id": _nid(), "type": "stat", "title": title, "description": desc, "datasource": targets[0]["datasource"],
             "gridPos": {"x": x, "y": y, "w": w, "h": h}, "targets": targets,
             "fieldConfig": {"defaults": {"unit": unit, "mappings": mappings or [],
                                          "thresholds": {"mode": "absolute",
@@ -65,7 +65,7 @@ def stat(title, targets, x, y, w=4, h=4, unit="short", desc="", mappings=None, s
 
 
 def table(title, targets, x, y, w=12, h=8, desc="", unit="short", steps=None, transformations=None):
-    return {"id": _nid(), "type": "table", "title": title, "description": desc, "datasource": PROM,
+    return {"id": _nid(), "type": "table", "title": title, "description": desc, "datasource": targets[0]["datasource"],
             "gridPos": {"x": x, "y": y, "w": w, "h": h}, "targets": targets,
             "fieldConfig": {"defaults": {"unit": unit, "custom": {"cellOptions": {"type": "color-background"}},
                                          "thresholds": {"mode": "absolute",
@@ -81,6 +81,14 @@ def state_timeline(title, targets, x, y, w=24, h=6, desc="", mappings=None):
                                          "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": None}]}},
                             "overrides": []},
             "options": {"showValue": "never", "mergeValues": True, "rowHeight": 0.8}}
+
+
+def logs_panel(title, expr, x, y, w=24, h=14, desc=""):
+    return {"id": _nid(), "type": "logs", "title": title, "description": desc, "datasource": LOKI,
+            "gridPos": {"x": x, "y": y, "w": w, "h": h},
+            "targets": [{"datasource": LOKI, "expr": expr, "refId": "A", "queryType": "range"}],
+            "options": {"showTime": True, "wrapLogMessage": True, "prettifyLogMessage": False,
+                        "enableLogDetails": True, "sortOrder": "Descending", "dedupStrategy": "none"}}
 
 
 def row(title, y):
@@ -106,6 +114,15 @@ ANOTACIONES_BASE = [
     {"datasource": PROM, "enable": True, "iconColor": "purple", "name": "Cambio de réplicas de cv-module",
      "expr": 'changes(count(up{job="cv-module"} == 1)[1m:15s]) > 0', "step": "30s",
      "titleFormat": "Cambió la cantidad de workers", "textFormat": "réplicas UP cambió en el último minuto"},
+    # Anotaciones generadas automáticamente desde los logs de Loki (como en Grafana Fundamentals)
+    {"datasource": LOKI, "enable": True, "iconColor": "blue", "name": "Logs: arranque/parada de workers",
+     "expr": '{event=~"worker_started|worker_stopped|pipeline_started|pipeline_stopped"}',
+     "tagKeys": "service,event", "titleFormat": "{{event}}", "textFormat": "{{service}}"},
+    {"datasource": LOKI, "enable": True, "iconColor": "red", "name": "Logs: DLQ y logs descartados",
+     "expr": '{event=~"clip_dead_lettered|logs_dropped"}',
+     "tagKeys": "service,event", "titleFormat": "{{event}}", "textFormat": "{{service}}"},
+    {"datasource": LOKI, "enable": False, "iconColor": "orange", "name": "Logs: edge_lagging (muchas con carga)",
+     "expr": '{event="edge_lagging"}', "tagKeys": "service,event", "titleFormat": "{{event}}", "textFormat": "{{service}}"},
 ]
 
 
@@ -270,7 +287,50 @@ def d_pipeline():
     p.append(ts("Brokers: conexiones y memoria", [
         target('sum by (service) (rabbitmq_connections)', "{{service}} conexiones"),
         target('sum by (service) (rabbitmq_process_resident_memory_bytes) / 1e6', "{{service}} MB", "B")], 12, 42, w=12))
+    p.append(ts("monitoring-pipeline: logs procesados vs llegados", [
+        target('sum(rate(pipeline_logs_processed_total[$__rate_interval]))', "procesados/s"),
+        target('sum by (result) (rate(pipeline_loki_push_total[$__rate_interval]))', "push a Loki {{result}}/s", "B"),
+        target('pipeline_loki_buffer_size', "buffer hacia Loki", "C")], 0, 50, w=12,
+        desc="emitidos == recibidos: logs_queue no crece si procesados/s sigue al ritmo de llegada."))
+    p.append(ts("monitoring-pipeline: atraso de los logs (p95) y descartes", [
+        target('histogram_quantile(0.95, sum by (le) (rate(pipeline_lag_seconds_bucket[5m])))', "atraso p95"),
+        target('sum(increase(pipeline_loki_dropped_total[5m]))', "descartados hacia Loki (5 min)", "B")], 12, 50, w=12, unit="s"))
     return dashboard("sgtu-pipeline", "SGTU · Pipeline de procesamiento", "Edge → cola → workers → base", p, ["pipeline"])
+
+
+# ======================================================================
+# Dashboard 4 — Logs (Loki)
+# ======================================================================
+def d_logs():
+    _id[0] = 0
+    sel = '{service=~"$service", level=~"$level", event=~"$event"}'
+    p = [text("**Logs centralizados (Loki)** — los publica cada servicio en `logs_queue` y el monitoring-pipeline los "
+              "valida, enriquece (`trace_hex`) y envía a Loki. Labels: `service`, `level`, `event`; el resto se filtra con "
+              "`| json` (p. ej. `| json | clip_id=\"...\"`). Desde un log de clip: *trace_hex* → **Ver traza** en Jaeger.", 0, 0, h=3)]
+    p.append(ts("Volumen de logs por nivel", [target(f'sum by (level) (count_over_time({sel} [$__auto]))', "{{level}}", ds=LOKI)],
+                0, 3, w=12, h=7, stack=True))
+    p.append(ts("Errores y advertencias por servicio", [target(
+        'sum by (service, level) (count_over_time({service=~"$service", level=~"ERROR|WARNING"} [$__auto]))', "{{service}} {{level}}", ds=LOKI)],
+        12, 3, w=12, h=7, stack=True))
+    p.append(ts("clip_failed por etapa (desde logs, | json)", [target(
+        'sum by (stage) (count_over_time({event="clip_failed"} | json [5m]))', "{{stage}}", ds=LOKI)], 0, 10, w=12, h=7))
+    p.append(table("Eventos más frecuentes (última hora)", [target(
+        'topk(15, sum by (service, event) (count_over_time({service=~"$service"} [1h])))', "", ds=LOKI, instant=True)],
+        12, 10, w=12, h=7, transformations=[{"id": "labelsToFields", "options": {}},
+                                             {"id": "organize", "options": {"excludeByName": {"Time": True},
+                                                                            "renameByName": {"Value": "eventos (1 h)"}}}]))
+    p.append(logs_panel("Logs (filtrar con las variables de arriba y 'Buscar')", sel + ' |~ "(?i)$buscar"', 0, 17))
+    variables = [
+        {"name": "service", "label": "Servicio", "type": "query", "datasource": LOKI, "query": {"label": "service", "type": 1, "refId": "v"},
+         "includeAll": True, "multi": True, "allValue": ".+", "current": {"text": "All", "value": "$__all"}, "refresh": 2},
+        {"name": "level", "label": "Nivel", "type": "query", "datasource": LOKI, "query": {"label": "level", "type": 1, "refId": "v"},
+         "includeAll": True, "multi": True, "allValue": ".+", "current": {"text": "All", "value": "$__all"}, "refresh": 2},
+        {"name": "event", "label": "Evento", "type": "query", "datasource": LOKI, "query": {"label": "event", "type": 1, "refId": "v"},
+         "includeAll": True, "multi": True, "allValue": ".+", "current": {"text": "All", "value": "$__all"}, "refresh": 2},
+        {"name": "buscar", "label": "Buscar (regex, p. ej. un clip_id)", "type": "textbox", "query": "", "current": {"text": "", "value": ""}},
+    ]
+    return dashboard("sgtu-logs", "SGTU · Logs", "Logs de todos los servicios en Loki", p, ["logs"], variables=variables,
+                     desde="now-30m")
 
 
 # ======================================================================
@@ -434,6 +494,28 @@ def reglas():
               "El contenedor canary está caído o trabado: el monitoreo sintético no está midiendo.",
               "docker compose ps canary / docker logs canary.", panel_dash="sgtu-salud", sin_datos="Alerting"),
     ]
+    logs = [
+        regla("log-dead-lettered", "Logs: clips enviados a la DLQ", 'sum(count_over_time({event="clip_dead_lettered"} [5m]))',
+              "gt", 0, "0s", "warning", "{{ $values.A }} clip_dead_lettered en los logs (5 min)",
+              "Alerta basada en LOGS (LogQL): el worker registró clips enviados a camera_dlq. Complementa la alerta por métricas de RabbitMQ.",
+              "1) Logs → evento clip_dead_lettered y clip_failed (| json → stage, error). 2) trace_hex → traza en Jaeger.",
+              ds=LOKI, rango=300, tipo_query="loki", panel_dash="sgtu-logs"),
+        regla("log-logs-dropped", "Logs: se descartaron logs en un servicio", 'sum by (service) (count_over_time({event="logs_dropped"} [10m]))',
+              "gt", 0, "0s", "warning", "{{ $labels.service }} descartó logs (buffer en memoria lleno)",
+              "Alerta basada en LOGS: logs-queue estuvo caído o lento y el buffer de 10 000 registros se llenó (D15). Las métricas derivadas de logs quedan bajas en ese período; stdout los conserva.",
+              "1) ¿logs-queue arriba? Salud técnica → probes. 2) Pipeline → logs_queue. 3) docker compose logs <servicio> (stdout tiene todo).",
+              ds=LOKI, rango=600, tipo_query="loki", panel_dash="sgtu-logs"),
+        regla("log-errores", "Logs: ráfaga de errores", 'sum by (service) (count_over_time({level="ERROR"} [5m]))',
+              "gt", 20, "1m", "warning", "{{ $labels.service }}: {{ $values.A }} logs ERROR en 5 min",
+              "Muchos logs de nivel ERROR en un servicio (no solo un clip suelto).",
+              "Logs → filtrar Servicio y Nivel=ERROR; mirar el campo error y seguir la traza.",
+              ds=LOKI, rango=300, tipo_query="loki", panel_dash="sgtu-logs"),
+        regla("pipeline-sin-consumir", "monitoring-pipeline no consume logs_queue", 'max(pipeline_consumer_up) or vector(0)',
+              "lt", 1, "1m", "warning", "El monitoring-pipeline no está consumiendo logs_queue",
+              "Sin consumidor, logs_queue crece hasta su límite (policy: 50 000 mensajes, después descarta los más viejos) y Loki deja de recibir logs.",
+              "1) docker compose logs monitoring-pipeline (pipeline_reconnecting). 2) Pipeline → logs_queue.",
+              panel_dash="sgtu-pipeline"),
+    ]
     info = [
         regla("congestion-sostenida", "Intersección congestionada de forma sostenida",
               'min_over_time(traffic_intersection_state[10m])', "gt", 1.5, "0s", "info",
@@ -442,7 +524,8 @@ def reglas():
               "Tránsito → 'Historia del estado'. Coordinar con el operador (semáforos, desvíos).", rango=900,
               panel_dash="sgtu-transito"),
     ]
-    return [("SGTU · Críticas", "30s", criticas), ("SGTU · Advertencias", "30s", warnings), ("SGTU · Negocio", "1m", info)]
+    return [("SGTU · Críticas", "30s", criticas), ("SGTU · Advertencias", "30s", warnings),
+            ("SGTU · Logs", "30s", logs), ("SGTU · Negocio", "1m", info)]
 
 
 def provisioning_alertas(grupos):
@@ -452,7 +535,8 @@ def provisioning_alertas(grupos):
 
 
 def main():
-    dashboards = {"salud.json": d_salud(), "pipeline.json": d_pipeline(), "transito.json": d_transito()}
+    dashboards = {"salud.json": d_salud(), "pipeline.json": d_pipeline(), "transito.json": d_transito(),
+                  "logs.json": d_logs()}
     for nombre, d in dashboards.items():
         (BASE / "dashboards" / nombre).write_text(json.dumps(d, indent=2, ensure_ascii=False) + "\n")
     (BASE / "provisioning" / "alerting" / "reglas.json").write_text(

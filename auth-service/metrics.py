@@ -14,6 +14,7 @@ from datetime import datetime
 import psycopg2
 
 import config
+from logs import log_event
 from observability import counter, on_response, register_collector
 
 LOGINS = counter("auth_login_total", "Intentos de login por resultado", ("result",))
@@ -24,7 +25,15 @@ _RESULTADO_LOGIN = {200: "ok", 401: "invalid", 422: "bad_request"}
 @on_response
 def _contar_login(method, route, status, seconds):
     if route == "/login" and method == "POST":
-        LOGINS.labels(_RESULTADO_LOGIN.get(status, "error")).inc()
+        resultado = _RESULTADO_LOGIN.get(status, "error")
+        LOGINS.labels(resultado).inc()
+        # Sin usuario ni contraseña ni token: solo el resultado (O19).
+        log_event("auth_login", level="INFO" if resultado == "ok" else "WARNING",
+                  duration_ms=seconds * 1000, result=resultado, status_code=status,
+                  message=f"login {resultado}")
+    if status >= 500:
+        log_event("auth_request_failed", level="ERROR", duration_ms=seconds * 1000, method=method,
+                  route=route, status_code=status, message=f"{method} {route} respondió {status}")
 
 
 class _SesionesActivas:
@@ -69,3 +78,5 @@ register_collector(_SesionesActivas())
 # Series en 0 desde el arranque (si nacen en 1, increase()/rate() no ven el primer evento).
 for _r in ("ok", "invalid", "bad_request", "error"):
     LOGINS.labels(_r)
+
+log_event("auth_started", message=f"{config.SERVICE_NAME} iniciado en el puerto {config.SERVICE_PORT}")

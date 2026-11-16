@@ -1163,6 +1163,143 @@
           "sort": "desc"
         }
       }
+    },
+    {
+      "id": 22,
+      "type": "timeseries",
+      "title": "monitoring-pipeline: logs procesados vs llegados",
+      "description": "emitidos == recibidos: logs_queue no crece si procesados/s sigue al ritmo de llegada.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 50,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum(rate(pipeline_logs_processed_total[$__rate_interval]))",
+          "refId": "A",
+          "legendFormat": "procesados/s"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum by (result) (rate(pipeline_loki_push_total[$__rate_interval]))",
+          "refId": "B",
+          "legendFormat": "push a Loki {{result}}/s"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "pipeline_loki_buffer_size",
+          "refId": "C",
+          "legendFormat": "buffer hacia Loki"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 10,
+            "showPoints": "never",
+            "stacking": {
+              "mode": "none"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "id": 23,
+      "type": "timeseries",
+      "title": "monitoring-pipeline: atraso de los logs (p95) y descartes",
+      "description": "",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 50,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(pipeline_lag_seconds_bucket[5m])))",
+          "refId": "A",
+          "legendFormat": "atraso p95"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum(increase(pipeline_loki_dropped_total[5m]))",
+          "refId": "B",
+          "legendFormat": "descartados hacia Loki (5 min)"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 10,
+            "showPoints": "never",
+            "stacking": {
+              "mode": "none"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
     }
   ],
   "templating": {
@@ -1194,6 +1331,45 @@
         "step": "30s",
         "titleFormat": "Cambió la cantidad de workers",
         "textFormat": "réplicas UP cambió en el último minuto"
+      },
+      {
+        "datasource": {
+          "type": "loki",
+          "uid": "loki"
+        },
+        "enable": true,
+        "iconColor": "blue",
+        "name": "Logs: arranque/parada de workers",
+        "expr": "{event=~\"worker_started|worker_stopped|pipeline_started|pipeline_stopped\"}",
+        "tagKeys": "service,event",
+        "titleFormat": "{{event}}",
+        "textFormat": "{{service}}"
+      },
+      {
+        "datasource": {
+          "type": "loki",
+          "uid": "loki"
+        },
+        "enable": true,
+        "iconColor": "red",
+        "name": "Logs: DLQ y logs descartados",
+        "expr": "{event=~\"clip_dead_lettered|logs_dropped\"}",
+        "tagKeys": "service,event",
+        "titleFormat": "{{event}}",
+        "textFormat": "{{service}}"
+      },
+      {
+        "datasource": {
+          "type": "loki",
+          "uid": "loki"
+        },
+        "enable": false,
+        "iconColor": "orange",
+        "name": "Logs: edge_lagging (muchas con carga)",
+        "expr": "{event=\"edge_lagging\"}",
+        "tagKeys": "service,event",
+        "titleFormat": "{{event}}",
+        "textFormat": "{{service}}"
       }
     ]
   },

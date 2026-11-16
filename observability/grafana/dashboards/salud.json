@@ -1201,6 +1201,45 @@
         "step": "30s",
         "titleFormat": "Cambió la cantidad de workers",
         "textFormat": "réplicas UP cambió en el último minuto"
+      },
+      {
+        "datasource": {
+          "type": "loki",
+          "uid": "loki"
+        },
+        "enable": true,
+        "iconColor": "blue",
+        "name": "Logs: arranque/parada de workers",
+        "expr": "{event=~\"worker_started|worker_stopped|pipeline_started|pipeline_stopped\"}",
+        "tagKeys": "service,event",
+        "titleFormat": "{{event}}",
+        "textFormat": "{{service}}"
+      },
+      {
+        "datasource": {
+          "type": "loki",
+          "uid": "loki"
+        },
+        "enable": true,
+        "iconColor": "red",
+        "name": "Logs: DLQ y logs descartados",
+        "expr": "{event=~\"clip_dead_lettered|logs_dropped\"}",
+        "tagKeys": "service,event",
+        "titleFormat": "{{event}}",
+        "textFormat": "{{service}}"
+      },
+      {
+        "datasource": {
+          "type": "loki",
+          "uid": "loki"
+        },
+        "enable": false,
+        "iconColor": "orange",
+        "name": "Logs: edge_lagging (muchas con carga)",
+        "expr": "{event=\"edge_lagging\"}",
+        "tagKeys": "service,event",
+        "titleFormat": "{{event}}",
+        "textFormat": "{{service}}"
       }
     ]
   },

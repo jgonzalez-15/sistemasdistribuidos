@@ -199,6 +199,8 @@ docker compose --profile observability down                               # sin 
 | :--- | :--- | :--- |
 | Prometheus | http://localhost:9090 (`PROMETHEUS_PORT`) | *Status → Targets*: todos los servicios, cada réplica de `cv-module`, exporters y probes. Retención 3 días. |
 | Grafana | http://localhost:3001 (`GRAFANA_PORT`) | Usuario `admin` / `admin` (dev, `GRAFANA_ADMIN_*`). Carpeta **SGTU**: dashboards *Salud técnica*, *Pipeline de procesamiento* y *Tránsito*; *Alerting → Alert rules*: 18+ reglas. Todo provisionado desde `observability/grafana/` (sin clicks). |
+| Loki | http://localhost:3100 (`LOKI_PORT`) | Logs de todos los servicios (vía monitoring-pipeline). Consultar desde Grafana → *Explore* o el dashboard *SGTU · Logs*, p. ej. `{service="cv-module", event="clip_failed"} \| json`. Retención 48 h. |
+| Metrics DB | `localhost:5435` (`postgres`/`postgres`) | Agregados por minuto: `docker compose exec metrics-db psql -U postgres -d metrics_db -c 'SELECT * FROM metrics_minute ORDER BY minute DESC LIMIT 5'`. Es parte del sistema base. |
 | Alertas recibidas | `docker logs -f alert-receiver` | Contact point webhook: imprime cada alerta *firing* / *resolved*. |
 | `/metrics` de cada servicio | p. ej. http://localhost:8000/metrics | Se apaga con `METRICS_ENABLED=false`. |
 
@@ -209,3 +211,5 @@ Dashboards y reglas se generan con `python3 observability/grafana/generar.py` (s
 Variables nuevas (todas con default de desarrollo, ver `.env.example`): `GRAFANA_PORT`, `GRAFANA_ADMIN_USER`, `GRAFANA_ADMIN_PASSWORD`, `ALERT_WEBHOOK_URL`, `METRICS_ENABLED`, `MINIO_PROMETHEUS_AUTH_TYPE`, `PROMETHEUS_PORT`, `PROMETHEUS_RETENTION`, `PROMETHEUS_RETENTION_SIZE`, `CANARY_USER`, `CANARY_PASSWORD`, `CANARY_INTERVAL_S`, `AUTH_METRICS_CACHE_S`, `VIZ_METRICS_CACHE_S`.
 
 > cAdvisor es opcional porque depende de cómo cada SO expone los sockets de Docker: probado en Docker Desktop para macOS; en Windows puede no funcionar.
+
+**`logs_queue` acotada** (policy `logs-queue-limites`: 50 000 mensajes, descarta los más viejos, TTL 24 h). Si el broker ya estaba levantado antes de este cambio: `docker compose restart logs-queue` (recarga `definitions.json` sin borrar la cola).

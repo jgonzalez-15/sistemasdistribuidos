@@ -6,7 +6,7 @@ Formato igual que D1–D17: motivo, costo aceptado y alternativa descartada.
 
 Principio rector (heredado de D15): **la observabilidad no puede tirar abajo el producto.**
 
-Estado: F1 (métricas) y F2 (Grafana y alertas) implementadas. F3–F5: las decisiones se agregan al cerrar cada fase.
+Estado: F1 (métricas), F2 (Grafana y alertas) y F3 (logs) implementadas. F4–F5: las decisiones se agregan al cerrar cada fase.
 
 ---
 
@@ -109,3 +109,38 @@ Estado: F1 (métricas) y F2 (Grafana y alertas) implementadas. F3–F5: las deci
 - **Contact point:** webhook a `alert-receiver`, que imprime cada notificación (`docker logs -f alert-receiver`). La URL es configurable (`ALERT_WEBHOOK_URL`): sirve para Slack, Discord o cualquier webhook propio sin cambiar código.
 - **Verificado:** con `docker compose stop cv-module`, *Sin workers de CV* y *camera_processing_queue sin consumidores* pasaron a Firing a los 92 s y llegaron al webhook. Al volver a arrancarlo se resolvieron (notificación `resolved`) a los 56 s.
 - **Alternativa descartada (por ahora):** Alertmanager con reglas en Prometheus. El curso muestra el alerting de Grafana (contact point, pending period, UI unificada) y además permite alertas sobre logs (LogQL) en el mismo lugar. Alertmanager queda como bonus.
+
+## O16. Logs a Loki a través del monitoring-pipeline (no scrapeando stdout)
+- **Qué:** los servicios siguen escribiendo JSON a stdout y publicándolo en `logs_queue` (D15, sin cambios). El `monitoring-pipeline` consume la cola, **valida** (objeto JSON con `service` y `event`), **limpia** (enmascara claves tipo `password`/`token`/`authorization`), **enriquece** (`trace_hex` = `trace_id` sin guiones, que es el formato de trace id de OpenTelemetry, y `pipeline_received_at`) y hace *push* a Loki en lotes.
+- **Labels de Loki:** solo `service`, `level` y `event` (baja cardinalidad). `trace_id`, `clip_id`, `camera_id`, etc. quedan en la línea y se filtran con `| json`. Se apagaron los labels automáticos de Loki 3 (`service_name`, `detected_level`), que los duplicaban.
+- **Por qué:** respeta la arquitectura original (logs → cola → pipeline → almacenamiento) y **drena** `logs_queue`, que antes crecía sin límite. Antes de F3 había 37 925 mensajes acumulados; con el pipeline la cola llegó a 0 en ~30 s (medido).
+- **Alternativa descartada:** Grafana Alloy (Promtail está discontinuado) leyendo stdout de Docker. Es otro agente con acceso al socket de Docker, deja `logs_queue` sin consumir y duplica el camino que ya existe.
+- **Por qué Loki y no ELK:** Loki indexa solo los labels (no el texto), así que entra en ~100 MB de RAM y se integra con Grafana (Explore, anotaciones, alertas LogQL). Elasticsearch necesita una JVM con 1–2 GB, que no entra en una laptop junto con todo el sistema. El costo aceptado es que las búsquedas de texto libre son más lentas (*grep* sobre los chunks), lo cual con 48 h de retención es aceptable.
+
+## O17. ACK siempre; push a Loki best-effort con buffer acotado
+- **Qué:** el consumidor hace ACK de cada mensaje después de procesarlo en memoria, sin esperar a Loki ni a la base. Los logs para Loki van a un buffer en memoria de hasta `LOKI_BUFFER_MAX` (20 000). Si Loki no responde, se reintenta con espera creciente (1→30 s); si el buffer se llena, se descartan los más viejos (`pipeline_loki_dropped_total`).
+- **Por qué:** la observabilidad no puede trabar el producto ni la cola. Con el perfil apagado (sin Loki), el pipeline sigue consumiendo y calculando métricas y agregados.
+- **Costo aceptado:** durante una caída larga de Loki se pierden logs **en Loki**. stdout de cada servicio los conserva y las métricas derivadas no se pierden.
+- **Alternativa descartada:** ACK solo cuando Loki confirma. No pierde logs, pero con Loki caído la cola crece hasta el tope y empieza a descartar igual (por la policy), así que es lo mismo con más acoplamiento.
+- El pipeline escribe **sus propios** logs solo a stdout (`stdout_log.py`): si los publicara en `logs_queue` se consumiría a sí mismo.
+
+## O18. Metrics DB propia (`metrics-db`) con agregados por minuto
+- **Qué:** contenedor `postgres:16-alpine` (puerto 5435, `mem_limit` 128 MB) en el compose **base**, porque el pipeline es parte del sistema base. El pipeline crea el esquema de forma idempotente y escribe por minuto (según el `ts` del log): clips publicados, procesados, duplicados, fallidos y dead-lettered, p95 y promedio de `duration_ms`, logs totales y de error, `logs_dropped` (`metrics_minute`), y fallos por servicio y etapa (`metrics_failures_minute`).
+- **Por qué:** Prometheus guarda 3 días. La Metrics DB da un histórico consultable por SQL para el informe, independiente del perfil de observabilidad, y es el componente "Metrics DB" del AOD original. Medido: ~72 clips/min con 6 cámaras, que es exactamente 6 × 60/5.
+- **Tolerancia a fallos:** un minuto se escribe cuando ya cerró (+30 s de margen). Si la base no responde, queda en memoria (hasta 180 minutos) y se reintenta. Un log atrasado se suma con UPSERT: los contadores quedan exactos y el p95 queda como el máximo de los lotes (aproximación conservadora).
+- **Alternativa descartada:** una tabla en `results-db`. Mezcla dominios y depende de la base de Joaco G.
+
+## O19. Logs estructurados también en auth-service y visualization-backend
+- **Qué:** `logs.py` copiado de api-rest (mismo contrato y mismo shipper). Los eventos se emiten desde los *hooks* de respuesta del middleware, **sin tocar los endpoints**: `auth_started`, `auth_login` (resultado y duración; **sin usuario, contraseña ni token**), `auth_request_failed` (5xx), `viz_started`, `viz_request_failed` (5xx) y `viz_metrics_query_failed` (solo al cambiar de estado, para no inundar).
+- **Por qué:** sin esto esos dos servicios no aparecían en Loki (solo usaban `print`).
+
+## O20. `logs_queue` acotada con una policy de RabbitMQ (no con x-arguments)
+- **Qué:** policy `logs-queue-limites` en `infrastructure/logs-queue/definitions.json`: `max-length` 50 000, `overflow: drop-head` (descarta los más viejos) y `message-ttl` 24 h.
+- **Por qué:** los argumentos `x-max-length`/`x-message-ttl` son parte de la declaración de la cola. Cambiarlos sobre una cola existente da `PRECONDITION_FAILED` y obliga a borrarla. Una **policy** se aplica a una cola existente sin recrearla, y los shippers (que declaran con `passive=True`) no se enteran. Se aplicó con `docker compose restart logs-queue` (recarga `definitions.json`) y se verificó con `rabbitmqctl list_queues name policy`. Sin reiniciar: `docker compose exec logs-queue rabbitmqctl set_policy logs-queue-limites "^logs_queue$" '{"max-length":50000,"overflow":"drop-head","message-ttl":86400000}' --apply-to queues`.
+- **Costo aceptado:** si el pipeline está caído más de lo que tardan en entrar 50 000 logs (~5 h a 165 msg/min en reposo), se pierden los más viejos de la cola. stdout los conserva.
+
+## O21. Alertas basadas en logs y anotaciones desde Loki
+- **Alertas LogQL:** `clip_dead_lettered` en 5 min, `logs_dropped` en 10 min, ráfaga de `ERROR` por servicio (> 20 en 5 min) y el pipeline sin consumir (por métrica). **Verificado:** después de `demo_dlq.sh`, *Logs: clips enviados a la DLQ* (LogQL) y *Mensajes nuevos en camera_dlq* (métrica de RabbitMQ) llegaron al webhook a los 13 s.
+- **Anotaciones automáticas** en todos los dashboards: arranque y parada de workers y del pipeline, `clip_dead_lettered`/`logs_dropped`, y `edge_lagging` (apagada por defecto: con carga son cientos).
+- **Dashboard *SGTU · Logs*:** volumen por nivel, errores por servicio, `clip_failed` por etapa (`| json`), eventos más frecuentes y el panel de logs con variables `service`/`level`/`event` y búsqueda libre.
+- **Hallazgo:** la alerta de memoria de contenedor detectó a Grafana al 90 % de su límite de 384 MB; se subió a 512 MB.

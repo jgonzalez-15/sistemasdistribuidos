@@ -971,6 +971,235 @@
     },
     {
       "orgId": 1,
+      "name": "SGTU · Logs",
+      "folder": "SGTU",
+      "interval": "30s",
+      "rules": [
+        {
+          "uid": "log-dead-lettered",
+          "title": "Logs: clips enviados a la DLQ",
+          "condition": "C",
+          "data": [
+            {
+              "refId": "A",
+              "relativeTimeRange": {
+                "from": 300,
+                "to": 0
+              },
+              "datasourceUid": "loki",
+              "model": {
+                "refId": "A",
+                "expr": "sum(count_over_time({event=\"clip_dead_lettered\"} [5m]))",
+                "queryType": "instant",
+                "instant": true,
+                "range": false
+              }
+            },
+            {
+              "refId": "C",
+              "datasourceUid": "__expr__",
+              "model": {
+                "refId": "C",
+                "type": "threshold",
+                "expression": "A",
+                "conditions": [
+                  {
+                    "evaluator": {
+                      "type": "gt",
+                      "params": [
+                        0
+                      ]
+                    }
+                  }
+                ]
+              }
+            }
+          ],
+          "for": "0s",
+          "noDataState": "OK",
+          "execErrState": "Error",
+          "labels": {
+            "severity": "warning",
+            "sistema": "sgtu"
+          },
+          "annotations": {
+            "summary": "{{ $values.A }} clip_dead_lettered en los logs (5 min)",
+            "description": "Alerta basada en LOGS (LogQL): el worker registró clips enviados a camera_dlq. Complementa la alerta por métricas de RabbitMQ.",
+            "runbook": "1) Logs → evento clip_dead_lettered y clip_failed (| json → stage, error). 2) trace_hex → traza en Jaeger.",
+            "dashboard": "http://localhost:3001/d/sgtu-logs"
+          },
+          "isPaused": false
+        },
+        {
+          "uid": "log-logs-dropped",
+          "title": "Logs: se descartaron logs en un servicio",
+          "condition": "C",
+          "data": [
+            {
+              "refId": "A",
+              "relativeTimeRange": {
+                "from": 600,
+                "to": 0
+              },
+              "datasourceUid": "loki",
+              "model": {
+                "refId": "A",
+                "expr": "sum by (service) (count_over_time({event=\"logs_dropped\"} [10m]))",
+                "queryType": "instant",
+                "instant": true,
+                "range": false
+              }
+            },
+            {
+              "refId": "C",
+              "datasourceUid": "__expr__",
+              "model": {
+                "refId": "C",
+                "type": "threshold",
+                "expression": "A",
+                "conditions": [
+                  {
+                    "evaluator": {
+                      "type": "gt",
+                      "params": [
+                        0
+                      ]
+                    }
+                  }
+                ]
+              }
+            }
+          ],
+          "for": "0s",
+          "noDataState": "OK",
+          "execErrState": "Error",
+          "labels": {
+            "severity": "warning",
+            "sistema": "sgtu"
+          },
+          "annotations": {
+            "summary": "{{ $labels.service }} descartó logs (buffer en memoria lleno)",
+            "description": "Alerta basada en LOGS: logs-queue estuvo caído o lento y el buffer de 10 000 registros se llenó (D15). Las métricas derivadas de logs quedan bajas en ese período; stdout los conserva.",
+            "runbook": "1) ¿logs-queue arriba? Salud técnica → probes. 2) Pipeline → logs_queue. 3) docker compose logs <servicio> (stdout tiene todo).",
+            "dashboard": "http://localhost:3001/d/sgtu-logs"
+          },
+          "isPaused": false
+        },
+        {
+          "uid": "log-errores",
+          "title": "Logs: ráfaga de errores",
+          "condition": "C",
+          "data": [
+            {
+              "refId": "A",
+              "relativeTimeRange": {
+                "from": 300,
+                "to": 0
+              },
+              "datasourceUid": "loki",
+              "model": {
+                "refId": "A",
+                "expr": "sum by (service) (count_over_time({level=\"ERROR\"} [5m]))",
+                "queryType": "instant",
+                "instant": true,
+                "range": false
+              }
+            },
+            {
+              "refId": "C",
+              "datasourceUid": "__expr__",
+              "model": {
+                "refId": "C",
+                "type": "threshold",
+                "expression": "A",
+                "conditions": [
+                  {
+                    "evaluator": {
+                      "type": "gt",
+                      "params": [
+                        20
+                      ]
+                    }
+                  }
+                ]
+              }
+            }
+          ],
+          "for": "1m",
+          "noDataState": "OK",
+          "execErrState": "Error",
+          "labels": {
+            "severity": "warning",
+            "sistema": "sgtu"
+          },
+          "annotations": {
+            "summary": "{{ $labels.service }}: {{ $values.A }} logs ERROR en 5 min",
+            "description": "Muchos logs de nivel ERROR en un servicio (no solo un clip suelto).",
+            "runbook": "Logs → filtrar Servicio y Nivel=ERROR; mirar el campo error y seguir la traza.",
+            "dashboard": "http://localhost:3001/d/sgtu-logs"
+          },
+          "isPaused": false
+        },
+        {
+          "uid": "pipeline-sin-consumir",
+          "title": "monitoring-pipeline no consume logs_queue",
+          "condition": "C",
+          "data": [
+            {
+              "refId": "A",
+              "relativeTimeRange": {
+                "from": 600,
+                "to": 0
+              },
+              "datasourceUid": "prometheus",
+              "model": {
+                "refId": "A",
+                "expr": "max(pipeline_consumer_up) or vector(0)",
+                "instant": true,
+                "range": false,
+                "intervalMs": 15000,
+                "maxDataPoints": 43200
+              }
+            },
+            {
+              "refId": "C",
+              "datasourceUid": "__expr__",
+              "model": {
+                "refId": "C",
+                "type": "threshold",
+                "expression": "A",
+                "conditions": [
+                  {
+                    "evaluator": {
+                      "type": "lt",
+                      "params": [
+                        1
+                      ]
+                    }
+                  }
+                ]
+              }
+            }
+          ],
+          "for": "1m",
+          "noDataState": "OK",
+          "execErrState": "Error",
+          "labels": {
+            "severity": "warning",
+            "sistema": "sgtu"
+          },
+          "annotations": {
+            "summary": "El monitoring-pipeline no está consumiendo logs_queue",
+            "description": "Sin consumidor, logs_queue crece hasta su límite (policy: 50 000 mensajes, después descarta los más viejos) y Loki deja de recibir logs.",
+            "runbook": "1) docker compose logs monitoring-pipeline (pipeline_reconnecting). 2) Pipeline → logs_queue.",
+            "dashboard": "http://localhost:3001/d/sgtu-pipeline"
+          },
+          "isPaused": false
+        }
+      ]
+    },
+    {
+      "orgId": 1,
       "name": "SGTU · Negocio",
       "folder": "SGTU",
       "interval": "1m",

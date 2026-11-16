@@ -97,6 +97,18 @@ scrape_configs:
         labels: { service: results-db }
       - targets: ["pg-exporter-auth:9187"]
         labels: { service: auth-db }
+      - targets: ["pg-exporter-metrics:9187"]
+        labels: { service: metrics-db }
+
+  - job_name: loki
+    static_configs:
+      - targets: ["loki:3100"]
+        labels: { service: loki }
+
+  - job_name: grafana
+    static_configs:
+      - targets: ["grafana:3000"]
+        labels: { service: grafana }
 
   # MinIO (clips-db): MINIO_PROMETHEUS_AUTH_TYPE=public, solo accesible en la red interna.
   - job_name: minio
@@ -199,6 +211,7 @@ scrape_configs:
       - targets:
           - results-db:5432
           - auth-db:5432
+          - metrics-db:5432
           - camera-queue:5672
           - logs-queue:5672
           - clips-db:9000
