@@ -5,6 +5,8 @@ from fastapi import FastAPI
 
 import config
 import logs
+import metrics
+import observability
 from edge import run_edge_threads
 
 stop_event = threading.Event()
@@ -24,6 +26,8 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="Edge Processor", lifespan=lifespan)
+observability.setup(app)                         # GET /metrics + RED de HTTP
+metrics.CAMERAS.set(len(config.parse_cameras()))
 
 
 @app.get("/health")

@@ -1,0 +1,232 @@
+# Prometheus del SGTU. Se monta en el contenedor `prometheus` (perfil observability).
+# Retención corta (--storage.tsdb.retention.time en el compose) pensando en laptops.
+#
+# Convención: cada target lleva el label `service` (nombre del servicio en Compose).
+# Labels de las aplicaciones: solo baja cardinalidad (ver observability.py).
+
+global:
+  scrape_interval: 15s
+  scrape_timeout: 10s
+  evaluation_interval: 15s
+  external_labels:
+    system: sgtu
+
+rule_files:
+  - /etc/prometheus/rules/*.yml
+
+scrape_configs:
+  - job_name: prometheus
+    static_configs:
+      - targets: ["localhost:9090"]
+        labels: { service: prometheus }
+
+  # ---------- Servicios de la aplicación (GET /metrics) ----------
+  - job_name: api-rest
+    static_configs:
+      - targets: ["api-rest:8000"]
+        labels: { service: api-rest }
+
+  - job_name: auth-service
+    static_configs:
+      - targets: ["auth-service:8005"]
+        labels: { service: auth-service }
+
+  - job_name: visualization-backend
+    static_configs:
+      - targets: ["visualization-backend:8003"]
+        labels: { service: visualization-backend }
+
+  - job_name: monitoring-pipeline
+    static_configs:
+      - targets: ["monitoring-pipeline:8004"]
+        labels: { service: monitoring-pipeline }
+
+  # Edge: por DNS para descubrir también las zonas extra (`docker compose run ... edge-processor`).
+  - job_name: edge-processor
+    dns_sd_configs:
+      - names: ["edge-processor"]
+        type: A
+        port: 8001
+        refresh_interval: 15s
+    relabel_configs:
+      - target_label: service
+        replacement: edge-processor
+
+  # Workers: una entrada DNS por réplica (`--scale cv-module=N`), sin container_name ni puerto publicado.
+  - job_name: cv-module
+    dns_sd_configs:
+      - names: ["cv-module"]
+        type: A
+        port: 8002
+        refresh_interval: 10s
+    relabel_configs:
+      - target_label: service
+        replacement: cv-module
+
+  - job_name: canary
+    static_configs:
+      - targets: ["canary:9101"]
+        labels: { service: canary }
+
+  # ---------- Brokers (plugin rabbitmq_prometheus, puerto 15692, solo red interna) ----------
+  # Métricas agregadas del nodo (conexiones, memoria, totales globales).
+  - job_name: rabbitmq
+    static_configs:
+      - targets: ["camera-queue:15692"]
+        labels: { service: camera-queue }
+      - targets: ["logs-queue:15692"]
+        labels: { service: logs-queue }
+
+  # Métricas POR COLA: el endpoint por defecto solo da agregados, por eso /metrics/detailed
+  # con las familias necesarias (camera_processing_queue, camera_dlq y logs_queue por separado).
+  - job_name: rabbitmq-queues
+    scrape_interval: 10s
+    metrics_path: /metrics/detailed
+    params:
+      family: [queue_coarse_metrics, queue_consumer_count]
+    static_configs:
+      - targets: ["camera-queue:15692"]
+        labels: { service: camera-queue }
+      - targets: ["logs-queue:15692"]
+        labels: { service: logs-queue }
+
+  # ---------- Bases de datos ----------
+  - job_name: postgres
+    static_configs:
+      - targets: ["pg-exporter-results:9187"]
+        labels: { service: results-db }
+      - targets: ["pg-exporter-auth:9187"]
+        labels: { service: auth-db }
+      - targets: ["pg-exporter-metrics:9187"]
+        labels: { service: metrics-db }
+
+  - job_name: loki
+    static_configs:
+      - targets: ["loki:3100"]
+        labels: { service: loki }
+
+  - job_name: grafana
+    static_configs:
+      - targets: ["grafana:3000"]
+        labels: { service: grafana }
+
+  # MinIO (clips-db): MINIO_PROMETHEUS_AUTH_TYPE=public, solo accesible en la red interna.
+  - job_name: minio
+    metrics_path: /minio/v2/metrics/cluster
+    static_configs:
+      - targets: ["clips-db:9000"]
+        labels: { service: clips-db }
+
+  - job_name: minio-bucket
+    metrics_path: /minio/v2/metrics/bucket
+    static_configs:
+      - targets: ["clips-db:9000"]
+        labels: { service: clips-db }
+
+  # ---------- Contenedores (cAdvisor, opcional: perfil `cadvisor`) ----------
+  # Por DNS: si cAdvisor no está levantado no aparece ningún target (no queda un target DOWN).
+  - job_name: cadvisor
+    scrape_interval: 15s
+    dns_sd_configs:
+      - names: ["cadvisor"]
+        type: A
+        port: 8080
+    metric_relabel_configs:
+      # Solo series de contenedores de Compose (con label de servicio): baja la cardinalidad de cAdvisor.
+      - source_labels: [container_label_com_docker_compose_service]
+        regex: ".+"
+        action: keep
+    relabel_configs:
+      - target_label: service
+        replacement: cadvisor
+
+  # ---------- Salud: probes de /health con blackbox_exporter ----------
+  # Exige HTTP 200 y "status": "ok" en el cuerpo (un viz con la base caída responde "degraded").
+  - job_name: blackbox-health
+    metrics_path: /probe
+    params:
+      module: [http_health]
+    static_configs:
+      - targets:
+          - http://api-rest:8000/health
+          - http://auth-service:8005/health
+          - http://edge-processor:8001/health
+          - http://visualization-backend:8003/health
+          - http://monitoring-pipeline:8004/health
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: __param_target
+      - source_labels: [__param_target]
+        target_label: instance
+      - source_labels: [__param_target]
+        regex: "http://([^:/]+).*"
+        target_label: service
+      - target_label: __address__
+        replacement: blackbox:9115
+
+  # Frontend (Vite): no tiene /health JSON, alcanza con que la página responda 2xx.
+  - job_name: blackbox-frontend
+    metrics_path: /probe
+    params:
+      module: [http_2xx]
+    static_configs:
+      - targets: ["http://frontend:3000/"]
+        labels: { service: frontend }
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: __param_target
+      - source_labels: [__param_target]
+        target_label: instance
+      - target_label: __address__
+        replacement: blackbox:9115
+
+  # /health de CADA réplica de cv-module (descubiertas por DNS).
+  - job_name: blackbox-health-cv
+    metrics_path: /probe
+    params:
+      module: [http_health]
+    dns_sd_configs:
+      - names: ["cv-module"]
+        type: A
+        port: 8002
+        refresh_interval: 10s
+    relabel_configs:
+      - source_labels: [__address__]
+        regex: "(.+)"
+        replacement: "http://$1/health"
+        target_label: __param_target
+      - source_labels: [__param_target]
+        target_label: instance
+      - target_label: service
+        replacement: cv-module
+      - target_label: __address__
+        replacement: blackbox:9115
+
+  # Bases y brokers: conexión TCP al puerto del servicio (además de los exporters).
+  - job_name: blackbox-tcp
+    metrics_path: /probe
+    params:
+      module: [tcp_connect]
+    static_configs:
+      - targets:
+          - results-db:5432
+          - auth-db:5432
+          - metrics-db:5432
+          - camera-queue:5672
+          - logs-queue:5672
+          - clips-db:9000
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: __param_target
+      - source_labels: [__param_target]
+        target_label: instance
+      - source_labels: [__param_target]
+        regex: "([^:]+):.*"
+        target_label: service
+      - target_label: __address__
+        replacement: blackbox:9115
+
+  - job_name: blackbox-exporter
+    static_configs:
+      - targets: ["blackbox:9115"]
+        labels: { service: blackbox }

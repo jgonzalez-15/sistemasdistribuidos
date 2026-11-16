@@ -424,3 +424,36 @@ export function simulateNextWorkerBatchUpdate(): IntersectionSummary[] {
 
   return [...currentIntersectionsState];
 }
+
+/**
+ * Clips procesados por minuto (Metrics DB) — GET /api/pipeline/clips-per-minute en el BFF.
+ * Mismo patrón que fetchSystemHealthFromBff: Authorization: Bearer <token>, null si falla.
+ */
+export async function fetchClipsPerMinuteFromBff(
+  minutes = 15,
+): Promise<{ timeSeries: { time: string; clips: number }[]; lastClipsPerMinute: number | null } | null> {
+  const token = localStorage.getItem(STORAGE_TOKEN_KEY);
+  if (!token) return null;
+
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 2500);
+
+    const response = await fetch(`${API_REST_URL}/api/pipeline/clips-per-minute?minutes=${minutes}`, {
+      method: 'GET',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      signal: controller.signal,
+    });
+    clearTimeout(timeout);
+
+    if (response.ok) {
+      return await response.json();
+    }
+  } catch {
+    // Backend unavailable
+  }
+  return null;
+}

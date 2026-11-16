@@ -20,6 +20,20 @@
       "read": ".*"
     }
   ],
+  "policies": [
+    {
+      "vhost": "/",
+      "name": "logs-queue-limites",
+      "pattern": "^logs_queue$",
+      "apply-to": "queues",
+      "priority": 0,
+      "definition": {
+        "max-length": 50000,
+        "overflow": "drop-head",
+        "message-ttl": 86400000
+      }
+    }
+  ],
   "queues": [
     {
       "name": "logs_queue",

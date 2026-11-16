@@ -1,0 +1,23 @@
+# Contact point y política de notificación (provisionados).
+# El receptor `alert-receiver` imprime cada alerta en stdout: docker logs -f alert-receiver
+# Para sumar Slack/Discord/email: agregar otro receiver acá (ver docs/decisiones-observabilidad.md, O15).
+apiVersion: 1
+
+contactPoints:
+  - orgId: 1
+    name: sgtu-webhook
+    receivers:
+      - uid: sgtu-webhook
+        type: webhook
+        disableResolveMessage: false
+        settings:
+          url: ${ALERT_WEBHOOK_URL}
+          httpMethod: POST
+
+policies:
+  - orgId: 1
+    receiver: sgtu-webhook
+    group_by: ["alertname", "grafana_folder"]
+    group_wait: 10s
+    group_interval: 30s
+    repeat_interval: 1h

@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
+  Activity,
   Gauge,
   Pause,
   Play,
@@ -16,8 +17,10 @@ import {
   EDGE_PROCESSOR_URL,
   MONITORING_PIPELINE_URL,
   VISUALIZATION_BACKEND_URL,
+  GRAFANA_URL,
 } from '../config';
 import { fetchSystemHealthFromBff } from '../services/bffApi';
+import ClipsPerMinutePill from '../components/ClipsPerMinutePill';
 
 interface SystemBackendViewProps {
   isFaultTolerantDemoMode: boolean;
@@ -870,6 +873,19 @@ export const SystemBackendView: React.FC<SystemBackendViewProps> = ({
         </div>
 
         <div className="sys-subheader-right">
+          <ClipsPerMinutePill />
+          <a
+            className="sim-btn"
+            href={`${GRAFANA_URL}/dashboards/f/sgtu/`}
+            target="_blank"
+            rel="noopener noreferrer"
+            id="btn-open-grafana"
+            title="Abrir los dashboards de observabilidad (Grafana: salud, pipeline, tránsito y logs) en otra pestaña"
+            style={{ textDecoration: 'none' }}
+          >
+            <Activity size={13} strokeWidth={1.75} />
+            <span>Observabilidad (Grafana)</span>
+          </a>
           <button
             type="button"
             className={`sim-btn ${isSlowMo ? 'active slowmo-active' : ''}`}

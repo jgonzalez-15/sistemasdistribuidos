@@ -9,6 +9,8 @@ from dotenv import load_dotenv
 import requests
 import config
 import logs
+import metrics  # noqa: F401  (registra api_access_denied_total y api_upstream_duration_seconds)
+import observability
 
 load_dotenv()
 
@@ -25,6 +27,7 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="API REST", lifespan=lifespan)
+observability.setup(app)                         # GET /metrics + RED de HTTP
 
 app.add_middleware(
     CORSMiddleware,
@@ -222,7 +225,8 @@ def request_visualization_backend(
 
         logs.log_event(
             "visualization_error",
-            level="WARNING",
+            # 5xx = falla del servidor (ERROR); 4xx = pedido inválido, p. ej. intersección inexistente (WARNING)
+            level="ERROR" if response.status_code >= 500 else "WARNING",
             session_id=session_id,
             duration_ms=duration_ms,
             message=f"Visualization-backend returned error status {response.status_code} ({target_path})",
@@ -450,6 +454,21 @@ def get_intersection_history(
         method="GET",
         session_id=session_id,
         params={"limit": limit},
+    )
+
+
+@app.get("/api/pipeline/clips-per-minute")
+def get_clips_per_minute(
+    minutes: int = Query(default=15, ge=1, le=240),
+    session_data: dict = Depends(require_user),
+):
+    """Frontend BFF endpoint: clips processed per minute (Metrics DB, via visualization-backend)."""
+    session_id = session_data.get("session_id")
+    return request_visualization_backend(
+        endpoint="/pipeline/clips-per-minute",
+        method="GET",
+        session_id=session_id,
+        params={"minutes": minutes},
     )
 
 

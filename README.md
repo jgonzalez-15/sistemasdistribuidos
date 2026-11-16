@@ -4,6 +4,26 @@ Every component in this repository is isolated in its own container and configur
 
 ---
 
+## Acceso y credenciales de desarrollo
+
+Con `docker compose up -d --build` (y `--profile observability` para Grafana) quedan disponibles:
+
+| Dónde | URL | Usuario / contraseña | Para qué |
+| :--- | :--- | :--- | :--- |
+| Frontend: operador | http://localhost:3000 | `user` / `user123` | Dashboard de congestión por intersección |
+| Frontend: administrador | http://localhost:3000 | `admin` / `admin123` | Lo mismo, más la vista Sistema (estado de los servicios) |
+| RabbitMQ `camera-queue` | http://localhost:15672 | `guest` / `guest` | Cola de clips, `camera_dlq`, consumidores al escalar |
+| RabbitMQ `logs-queue` | http://localhost:15673 | `guest` / `guest` | Cola de logs (`logs_queue`) |
+| MinIO (clips) | http://localhost:9001 | `minioadmin` / `minioadmin` | Bucket `clips` con los `.npy` |
+| Grafana (perfil `observability`) | http://localhost:3001 | `admin` / `admin1` | Dashboards y alertas |
+| PostgreSQL `auth-db` / `results-db` / `metrics-db` | `localhost:5433` / `5434` / `5435` | `postgres` / `postgres` | Consultas directas (`auth_db`, `results_db`, `metrics_db`) |
+
+Son credenciales **de desarrollo**, publicadas a propósito para poder probar y corregir el sistema. Todas se cambian por variable de entorno (`.env`, 12-Factor III). Las contraseñas del login se guardan en `auth-db` como hash PBKDF2, no en texto plano (sección 7).
+
+Los botones de carga rápida del login que usan otros usuarios (`operador.montevideo`, `admin.central`) solo funcionan en el modo sin backend. Con el sistema levantado se usan `user` y `admin`.
+
+---
+
 ## 1. Application Components & Configured Ports
 
 | Component | Directory | Language / Stack | Port | Main Entrypoint & Config |
@@ -32,7 +52,7 @@ Every component in this repository is isolated in its own container and configur
 - **Auth Database (`auth-db` - PostgreSQL 16)**:
   - **Ports**: Host `5433` $\rightarrow$ Container `5432`
   - **Database / Credentials**: `auth_db` (`postgres` / `postgres`)
-  - **Init Script**: `infrastructure/auth-db/init.sql` (`users` table with `username` and `password`)
+  - **Init Script**: `infrastructure/auth-db/init.sql`: tablas `users` (`username`, `password` como hash PBKDF2, `role`) y `sessions`. Usuarios de desarrollo: `user`/`user123` y `admin`/`admin123` (ver sección 7).
 - **Results Database (`results-db` - PostgreSQL 16)**:
   - **Ports**: Host `5434` $\rightarrow$ Container `5432`
   - **Database / Credentials**: `results_db` (`postgres` / `postgres`)
@@ -180,3 +200,51 @@ docker compose exec results-db psql -U postgres -d results_db -c "DELETE FROM re
 | Sección 2.1 de este README | Contrato del mensaje en `camera_processing_queue`. |
 | Sección 2.2 de este README | Configuración del edge y del worker, y eventos de log. |
 | Sección 4 de este README | Demos reproducibles (`scripts/`). |
+
+---
+
+## 6. Observabilidad (perfil opcional)
+
+El stack de observabilidad es **opt-in**: `docker compose up` levanta solo el sistema base, igual que antes. Decisiones en `docs/decisiones-observabilidad.md` (O1…On).
+
+**Prerrequisitos:** Docker Compose ≥ 2.20 (usa `include:`). RAM recomendada para Docker: 6–8 GB con el perfil activo.
+
+```bash
+docker compose --profile observability up -d --build                      # sistema + observabilidad
+docker compose --profile observability --profile cadvisor up -d --build   # + CPU/memoria por contenedor (opcional)
+docker compose --profile observability down                               # sin -v: conserva los datos
+```
+
+| Herramienta | URL | Notas |
+| :--- | :--- | :--- |
+| Prometheus | http://localhost:9090 (`PROMETHEUS_PORT`) | *Status → Targets*: todos los servicios, cada réplica de `cv-module`, exporters y probes. Retención 3 días. |
+| Grafana | http://localhost:3001 (`GRAFANA_PORT`) | Usuario `admin` / `admin1` (dev, `GRAFANA_ADMIN_*`; no pide cambiarla). Si tu Grafana se creó antes con otra contraseña, sigue valiendo esa (queda en el volumen `grafana_data`): `docker compose exec grafana grafana cli admin reset-admin-password admin1`. Carpeta **SGTU**: dashboards *Salud técnica*, *Pipeline de procesamiento* y *Tránsito*; *Alerting → Alert rules*: 18+ reglas. Todo provisionado desde `observability/grafana/` (sin clicks). |
+| Loki | http://localhost:3100 (`LOKI_PORT`) | Logs de todos los servicios (vía monitoring-pipeline). Consultar desde Grafana → *Explore* o el dashboard *SGTU · Logs*, p. ej. `{service="cv-module", event="clip_failed"} \| json`. Retención 48 h. |
+| Metrics DB | `localhost:5435` (`postgres`/`postgres`) | Agregados por minuto: `docker compose exec metrics-db psql -U postgres -d metrics_db -c 'SELECT * FROM metrics_minute ORDER BY minute DESC LIMIT 5'`. Es parte del sistema base. |
+| Alertas recibidas | `docker logs -f alert-receiver` | Contact point webhook: imprime cada alerta *firing* / *resolved*. |
+| `/metrics` de cada servicio | p. ej. http://localhost:8000/metrics | Se apaga con `METRICS_ENABLED=false`. |
+
+Servicios del perfil (solo red interna, sin puerto en el host): `blackbox` (probes de `/health` y TCP a bases y brokers), `pg-exporter-results`, `pg-exporter-auth`, `canary` (monitoreo sintético cada 30 s) y, con el perfil `cadvisor`, `cadvisor`. Los brokers exponen métricas con el plugin `rabbitmq_prometheus` (puerto interno 15692).
+
+Dashboards y reglas se generan con `python3 observability/grafana/generar.py` (se versionan los JSON generados; Grafana los recarga solo cada 30 s).
+
+Variables nuevas (todas con default de desarrollo, ver `.env.example`): `GRAFANA_PORT`, `GRAFANA_ADMIN_USER`, `GRAFANA_ADMIN_PASSWORD`, `ALERT_WEBHOOK_URL`, `METRICS_ENABLED`, `MINIO_PROMETHEUS_AUTH_TYPE`, `PROMETHEUS_PORT`, `PROMETHEUS_RETENTION`, `PROMETHEUS_RETENTION_SIZE`, `CANARY_USER`, `CANARY_PASSWORD`, `CANARY_INTERVAL_S`, `AUTH_METRICS_CACHE_S`, `VIZ_METRICS_CACHE_S`.
+
+> cAdvisor es opcional porque depende de cómo cada SO expone los sockets de Docker: probado en Docker Desktop para macOS; en Windows puede no funcionar.
+
+**`logs_queue` acotada** (policy `logs-queue-limites`: 50 000 mensajes, descarta los más viejos, TTL 24 h). Si el broker ya estaba levantado antes de este cambio: `docker compose restart logs-queue` (recarga `definitions.json` sin borrar la cola).
+
+---
+
+## 7. Seguridad: contraseñas
+
+`auth-service` guarda las contraseñas como hash PBKDF2-HMAC-SHA256 con sal por usuario: `pbkdf2_sha256$iteraciones$sal$hash`, en `auth-service/passwords.py`. Nunca las guarda en texto plano.
+- El login busca por usuario y compara el hash. Un usuario inexistente recibe la misma respuesta (401) y tarda lo mismo.
+- Usuarios de desarrollo: `user`/`user123` y `admin`/`admin123`, configurables con `AUTH_SEED_USER_PASSWORD` y `AUTH_SEED_ADMIN_PASSWORD`.
+- **Bases existentes:** al arrancar, `auth-service` convierte a hash toda contraseña vieja en texto plano (evento `passwords_migrated`). No hace falta borrar el volumen.
+- **Si se vuelve a una versión anterior** de `auth-service` con la base ya convertida, nadie puede entrar. Se recupera con:
+  ```bash
+  docker compose exec -T auth-db psql -U postgres -d auth_db -c "UPDATE users SET password='user123' WHERE username='user'; UPDATE users SET password='admin123' WHERE username='admin';"
+  ```
+
+Decisión y riesgos conocidos que quedan (puertos internos publicados, CORS, credenciales por defecto): `docs/decisiones-seguridad.md`.
