@@ -332,6 +332,7 @@ services:
       VITE_API_REST_URL: ${VITE_API_REST_URL:-http://localhost:8000}
       VITE_AUTH_SERVICE_URL: ${VITE_AUTH_SERVICE_URL:-http://localhost:8005}
       VITE_VISUALIZATION_BACKEND_URL: ${VITE_VISUALIZATION_BACKEND_URL:-http://localhost:8003}
+      VITE_GRAFANA_URL: ${VITE_GRAFANA_URL:-http://localhost:3001}   # link "Observabilidad" en la vista Sistema
     depends_on:
       - api-rest
     networks:
