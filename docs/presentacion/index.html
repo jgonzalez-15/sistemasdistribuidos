@@ -1,0 +1,883 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SGTU Montevideo</title>
+<style>
+  @font-face { font-family: 'Inter'; font-weight: 400; src: url(fonts/inter-latin-400-normal.woff2) format('woff2'); }
+  @font-face { font-family: 'Inter'; font-weight: 500; src: url(fonts/inter-latin-500-normal.woff2) format('woff2'); }
+  @font-face { font-family: 'Inter'; font-weight: 600; src: url(fonts/inter-latin-600-normal.woff2) format('woff2'); }
+  @font-face { font-family: 'Inter'; font-weight: 700; src: url(fonts/inter-latin-700-normal.woff2) format('woff2'); }
+  @font-face { font-family: 'Inter'; font-weight: 800; src: url(fonts/inter-latin-800-normal.woff2) format('woff2'); }
+  @font-face { font-family: 'JetBrains Mono'; font-weight: 400; src: url(fonts/jetbrains-mono-latin-400-normal.woff2) format('woff2'); }
+  @font-face { font-family: 'JetBrains Mono'; font-weight: 500; src: url(fonts/jetbrains-mono-latin-500-normal.woff2) format('woff2'); }
+  @font-face { font-family: 'JetBrains Mono'; font-weight: 600; src: url(fonts/jetbrains-mono-latin-600-normal.woff2) format('woff2'); }
+
+  /* Paleta: modo claro del frontend SGTU, con más contraste para proyector */
+  :root {
+    --canvas: #f8fafc;
+    --card: #ffffff;
+    --elevated: #f1f5f9;
+    --border: rgba(15, 23, 42, 0.12);
+    --border-strong: rgba(15, 23, 42, 0.22);
+    --text: #0f172a;
+    --text-2: #334155;
+    --text-3: #64748b;
+    --accent: #2563eb;
+    --accent-soft: rgba(37, 99, 235, 0.09);
+    --critical: #dc2626;
+    --critical-soft: rgba(220, 38, 38, 0.09);
+    --moderate: #d97706;
+    --moderate-soft: rgba(217, 119, 6, 0.10);
+    --fluid: #059669;
+    --fluid-soft: rgba(5, 150, 105, 0.10);
+    --violet: #7c3aed;
+    --violet-pk: #8b5cf6;
+    --violet-soft: rgba(124, 58, 237, 0.09);
+    --sky: #0284c7;
+    --sky-soft: rgba(2, 132, 199, 0.10);
+    --sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    --mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+    --spring: cubic-bezier(0.22, 1, 0.36, 1);
+  }
+
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; overflow: hidden; background: #e2e8f0; }
+  body { font-family: var(--sans); color: var(--text); -webkit-font-smoothing: antialiased; }
+
+  #stage {
+    position: absolute; left: 50%; top: 50%;
+    width: 1920px; height: 1080px;
+    transform-origin: 0 0;
+    background: var(--canvas);
+    overflow: hidden;
+  }
+  .slide { position: absolute; inset: 0; display: none; overflow: hidden; background: var(--canvas); }
+  .slide.active { display: block; }
+  /* grilla tenue de fondo, como el lienzo del diagrama del frontend */
+  .slide::before {
+    content: ''; position: absolute; inset: 0; z-index: 0;
+    background-image: radial-gradient(rgba(15, 23, 42, 0.07) 1.2px, transparent 1.2px);
+    background-size: 40px 40px;
+  }
+  .arcs { position: absolute; inset: 0; width: 100%; height: 100%; z-index: 1; pointer-events: none; }
+  .content { position: absolute; inset: 0; z-index: 2; padding: 92px 120px 100px; display: flex; flex-direction: column; }
+
+  /* Entrada escalonada al cambiar de diapositiva */
+  .slide.active .rv { animation: rise .7s var(--spring) both; animation-delay: calc(var(--i, 0) * 80ms + 60ms); }
+  @keyframes rise { from { opacity: 0; transform: translateY(18px); } to { opacity: 1; transform: none; } }
+
+  /* Bloques que aparecen de a uno (un click o flecha por bloque) */
+  .frag { opacity: 0.0; transform: translateY(22px) scale(0.98); transition: opacity .55s var(--spring), transform .55s var(--spring); }
+  .frag.on { opacity: 1; transform: none; }
+  /* Títulos con la misma altura para que los subtextos queden alineados */
+  .eq .tile h3 { min-height: 2.2em; }
+  /* Logos de marca */
+  .logo { width: 92px; height: 92px; border-radius: 24px; display: grid; place-items: center; background: var(--elevated); flex: none; }
+  .logo .brand { width: 54px; height: 54px; display: block; }
+  .logo .brand svg { width: 100%; height: 100%; display: block; }
+
+  /* Encabezado */
+  .cat { display: inline-flex; align-items: center; gap: 14px; font-family: var(--mono); font-size: 22px; font-weight: 600; letter-spacing: 0.14em; text-transform: uppercase; color: var(--accent); }
+  .cat .ic { width: 34px; height: 34px; }
+  h1 { font-size: 200px; font-weight: 800; letter-spacing: -0.05em; line-height: 0.9; }
+  h2 { font-size: 76px; font-weight: 700; letter-spacing: -0.035em; line-height: 1.04; margin-top: 18px; }
+  .sub { font-size: 34px; color: var(--text-2); margin-top: 18px; font-weight: 500; letter-spacing: -0.01em; }
+  .mono { font-family: var(--mono); }
+  .body { flex: 1; min-height: 0; margin-top: 40px; position: relative; display: flex; flex-direction: column; justify-content: center; align-content: center; }
+
+  /* Iconos */
+  .ic { display: inline-block; width: 1em; height: 1em; flex: none; }
+  .ic svg { width: 100%; height: 100%; display: block; }
+  .bubble { width: 104px; height: 104px; border-radius: 26px; display: grid; place-items: center; background: var(--accent-soft); color: var(--accent); flex: none; }
+  .bubble .ic { width: 56px; height: 56px; }
+  .bubble.lg { width: 150px; height: 150px; border-radius: 36px; }
+  .bubble.lg .ic { width: 80px; height: 80px; }
+  .bubble.sm { width: 92px; height: 92px; border-radius: 24px; }
+  .bubble.sm .ic { width: 50px; height: 50px; }
+  .t-fluid { color: var(--fluid); } .t-mod { color: var(--moderate); } .t-crit { color: var(--critical); } .t-acc { color: var(--accent); } .t-vio { color: var(--violet); } .t-sky { color: var(--sky); } .t-3 { color: var(--text-3); }
+  .b-fluid { background: var(--fluid-soft); color: var(--fluid); }
+  .b-mod { background: var(--moderate-soft); color: var(--moderate); }
+  .b-crit { background: var(--critical-soft); color: var(--critical); }
+  .b-vio { background: var(--violet-soft); color: var(--violet); }
+  .b-sky { background: var(--sky-soft); color: var(--sky); }
+  .b-gray { background: var(--elevated); color: var(--text-2); }
+
+  .card { background: var(--card); border: 1.5px solid var(--border); border-radius: 22px; box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04), 0 8px 24px -12px rgba(15, 23, 42, 0.10); }
+  .grid { display: grid; gap: 28px; }
+  .row { display: flex; align-items: center; }
+
+  /* Tiles: icono + título + etiqueta corta */
+  .tile { padding: 38px 36px 36px; display: flex; flex-direction: column; gap: 22px; }
+  .tile h3 { font-size: 38px; font-weight: 700; letter-spacing: -0.02em; line-height: 1.1; }
+  .tile .tag { font-family: var(--mono); font-size: 23px; color: var(--text-2); line-height: 1.35; }
+  .chip { display: inline-flex; align-items: center; gap: 10px; font-family: var(--mono); font-size: 25px; font-weight: 500; padding: 12px 22px; border-radius: 999px; background: var(--card); border: 1.5px solid var(--border); color: var(--text-2); white-space: nowrap; }
+  .chip .ic { width: 26px; height: 26px; }
+  .chip.c-fluid { background: var(--fluid-soft); border-color: transparent; color: var(--fluid); }
+  .chip.c-mod { background: var(--moderate-soft); border-color: transparent; color: var(--moderate); }
+  .chip.c-crit { background: var(--critical-soft); border-color: transparent; color: var(--critical); }
+  .chip.c-acc { background: var(--accent-soft); border-color: transparent; color: var(--accent); }
+  .chip.c-vio { background: var(--violet-soft); border-color: transparent; color: var(--violet); }
+  .dot { width: 16px; height: 16px; border-radius: 50%; display: inline-block; flex: none; }
+
+  .big { font-size: 128px; font-weight: 800; letter-spacing: -0.05em; line-height: 0.95; font-variant-numeric: tabular-nums; }
+  .big small { font-size: 40px; font-weight: 600; letter-spacing: -0.01em; color: var(--text-2); }
+  .label { font-family: var(--mono); font-size: 22px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--text-3); }
+
+  .arrow { color: var(--text-3); }
+  .arrow .ic { width: 56px; height: 56px; }
+
+  /* Portada */
+  .lights { display: flex; gap: 18px; }
+  .lights span { width: 30px; height: 30px; border-radius: 50%; }
+
+  /* Agenda */
+  .agenda { display: grid; grid-template-columns: repeat(7, 1fr); gap: 22px; }
+  .agenda .it { display: flex; flex-direction: column; align-items: center; gap: 24px; text-align: center; }
+  .agenda .bubble { width: 150px; height: 150px; border-radius: 38px; }
+  .agenda .bubble .ic { width: 78px; height: 78px; }
+  .agenda .n { font-family: var(--mono); font-size: 24px; color: var(--text-3); }
+  .agenda .nm { font-size: 34px; font-weight: 700; letter-spacing: -0.02em; }
+
+  /* Flujo con conectores */
+  .flow { display: flex; flex-direction: row; align-items: center; justify-content: space-between; gap: 20px; }
+  .flow .step { display: flex; flex-direction: column; align-items: center; gap: 22px; text-align: center; }
+  .flow .step h3 { font-size: 38px; font-weight: 700; letter-spacing: -0.02em; }
+
+  /* Recorrido del clip */
+  .pipe { position: relative; height: 520px; }
+  .pipe svg.line { position: absolute; inset: 0; width: 100%; height: 100%; }
+  .pipe .st { position: absolute; top: 45px; width: 240px; margin-left: -120px; display: flex; flex-direction: column; align-items: center; gap: 20px; text-align: center; }
+  .pipe .st .circle { width: 180px; height: 180px; border-radius: 50%; background: var(--card); border: 2px solid var(--border-strong); display: grid; place-items: center; box-shadow: 0 10px 30px -14px rgba(15,23,42,.25); }
+  .pipe .st .circle .ic { width: 84px; height: 84px; }
+  .pipe .st h3 { font-size: 36px; font-weight: 700; letter-spacing: -0.02em; }
+  .pipe .st .tag { font-family: var(--mono); font-size: 22px; color: var(--text-2); }
+  .pipe .st .num { font-family: var(--mono); font-size: 20px; color: var(--text-3); }
+
+  /* Diagrama */
+  .diagram { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
+  .diagram .plane { fill: rgba(255,255,255,0.55); stroke: var(--border-strong); stroke-dasharray: 6 8; stroke-width: 1.5; }
+  .diagram .plane-l { font-family: var(--mono); font-size: 16px; letter-spacing: 0.12em; fill: var(--text-3); }
+  .diagram .node rect.bg { fill: var(--card); stroke-width: 2; }
+  .diagram .node .t { font-family: var(--sans); font-size: 25px; font-weight: 700; fill: var(--text); letter-spacing: -0.01em; }
+  .diagram .node .p { font-family: var(--mono); font-size: 17px; fill: var(--text-3); }
+  .diagram .wire { fill: none; stroke-width: 3; stroke-linejoin: round; stroke-linecap: round; }
+  .diagram .halo { fill: none; stroke-width: 12; stroke-opacity: 0.12; stroke-linejoin: round; stroke-linecap: round; }
+  .diagram .wl { font-family: var(--mono); font-size: 16px; fill: var(--text-2); }
+  .legend { display: flex; gap: 36px; font-family: var(--mono); font-size: 20px; color: var(--text-2); }
+  .legend span { display: inline-flex; align-items: center; gap: 10px; }
+  .legend i { width: 28px; height: 5px; border-radius: 3px; display: inline-block; }
+
+  /* Paquetes en vuelo */
+  .pk-badge { fill: var(--card); stroke-width: 1.5; }
+  .pk-text { font-family: var(--mono); font-weight: 600; text-anchor: middle; dominant-baseline: central; }
+
+  /* 12-Factor */
+  .factor { padding: 30px 34px; display: flex; align-items: center; gap: 30px; }
+  .factor .rn { font-family: var(--mono); font-size: 54px; font-weight: 600; color: var(--accent); width: 150px; text-align: center; flex: none; }
+  .factor h3 { font-size: 36px; font-weight: 700; letter-spacing: -0.02em; }
+  .factor .tag { font-family: var(--mono); font-size: 23px; color: var(--text-2); margin-top: 6px; }
+
+  /* Comunicación */
+  .comm { padding: 40px; display: flex; flex-direction: column; gap: 30px; }
+  .comm h3 { font-size: 42px; font-weight: 800; letter-spacing: -0.03em; }
+  .comm .kind { font-family: var(--mono); font-size: 21px; letter-spacing: 0.12em; text-transform: uppercase; }
+  .mini { display: flex; align-items: center; gap: 14px; }
+  .mini .bubble { width: 84px; height: 84px; border-radius: 22px; }
+  .mini .bubble .ic { width: 44px; height: 44px; }
+  .mini .dash { flex: 1; height: 3px; border-radius: 2px; position: relative; }
+  .mini .dash::after { content: ''; position: absolute; right: -2px; top: -6px; border: 7.5px solid transparent; border-left: 12px solid currentColor; border-right: 0; }
+  .why { display: flex; flex-wrap: wrap; gap: 12px; }
+
+  /* Claim check */
+  .cc { display: flex; align-items: center; justify-content: center; gap: 70px; }
+  .cc .obj { display: flex; flex-direction: column; align-items: center; gap: 20px; }
+  .cc .file { width: 230px; height: 280px; border-radius: 24px; background: var(--violet-soft); border: 2px solid rgba(124,58,237,.35); display: grid; place-items: center; color: var(--violet); }
+  .cc .file .ic { width: 110px; height: 110px; }
+  .cc .ticket { width: 120px; height: 70px; border-radius: 14px; background: var(--moderate-soft); border: 2px solid rgba(217,119,6,.4); display: grid; place-items: center; color: var(--moderate); font-family: var(--mono); font-size: 20px; font-weight: 600; }
+  .cc .size { font-size: 56px; font-weight: 800; letter-spacing: -0.03em; }
+
+  /* Barras de reparto */
+  .bars { display: flex; align-items: flex-end; gap: 30px; height: 280px; }
+  .bars .b { width: 110px; border-radius: 14px 14px 6px 6px; background: var(--fluid); position: relative; }
+  .bars .b span { position: absolute; top: -50px; left: 0; right: 0; text-align: center; font-size: 34px; font-weight: 700; color: var(--text); font-variant-numeric: tabular-nums; }
+  .bars-l { display: flex; gap: 30px; margin-top: 14px; }
+  .bars-l span { width: 110px; text-align: center; font-family: var(--mono); font-size: 19px; color: var(--text-3); }
+
+  /* Capturas */
+  .shot { border-radius: 18px; overflow: hidden; border: 1.5px solid var(--border-strong); box-shadow: 0 30px 60px -30px rgba(15, 23, 42, 0.35); background: var(--card); }
+  .shot img { display: block; width: 100%; height: auto; }
+
+  /* Log line */
+  .logline { font-family: var(--mono); font-size: 23px; line-height: 1.75; padding: 30px 36px; color: var(--text-2); }
+  .logline .k { color: var(--accent); } .logline .s { color: var(--fluid); } .logline .n { color: var(--moderate); } .logline .h { background: var(--violet-soft); color: var(--violet); border-radius: 6px; padding: 2px 8px; }
+
+  /* Chrome */
+  #footer { position: absolute; left: 120px; right: 120px; bottom: 36px; z-index: 5; display: flex; justify-content: space-between; font-family: var(--mono); font-size: 18px; color: var(--text-3); pointer-events: none; }
+  #progress { position: absolute; left: 0; bottom: 0; height: 5px; background: var(--accent); z-index: 5; transition: width .4s var(--spring); }
+  body.cover-mode #footer { opacity: 0; }
+
+  @media print {
+    html, body { overflow: visible; height: auto; background: #fff; }
+    #stage { position: static; transform: none !important; width: 1920px; height: auto; overflow: visible; }
+    .slide { display: block !important; position: relative; width: 1920px; height: 1080px; page-break-after: always; break-after: page; }
+    .slide .rv { animation: none !important; }
+    .frag { opacity: 1 !important; transform: none !important; transition: none !important; }
+    .card, .shot, .pipe .st .circle { box-shadow: none !important; }
+    #footer, #progress { display: none; }
+    @page { size: 1920px 1080px; margin: 0; }
+  }
+</style>
+</head>
+<body>
+<div id="stage">
+
+<!-- 1 · PORTADA -->
+<section class="slide" data-arcs="midtr:.npy">
+  <div class="content" style="justify-content:center">
+    <div class="lights rv" style="--i:0"><span style="background:var(--critical)"></span><span style="background:var(--moderate)"></span><span style="background:var(--fluid)"></span></div>
+    <div class="row rv" style="--i:1; gap:40px; margin-top:44px">
+      <div class="bubble lg"><i class="ic" data-i="cctv"></i></div>
+      <h1>SGTU</h1>
+    </div>
+    <div class="sub rv" style="--i:2; font-size:44px; margin-top:34px; color:var(--text)">Sistema de Gestión de Tránsito Urbano</div>
+    <div class="cat rv" style="--i:3; margin-top:22px; font-size:26px"><i class="ic" data-i="map-pin"></i>Montevideo · Sistemas Distribuidos 2026</div>
+    <div class="rv" style="--i:4; margin-top:110px; display:flex; flex-wrap:wrap; gap:14px; max-width:1100px">
+      <span class="chip"><i class="ic" data-i="user"></i>Hernán Astorino</span>
+      <span class="chip"><i class="ic" data-i="user"></i>Joaquín González</span>
+      <span class="chip"><i class="ic" data-i="user"></i>Iago Machado</span>
+      <span class="chip"><i class="ic" data-i="user"></i>Joaquín Rodríguez</span>
+      <span class="chip"><i class="ic" data-i="user"></i>Rosario Stoppiello</span>
+    </div>
+  </div>
+</section>
+
+<!-- 2 · AGENDA -->
+<section class="slide" data-arcs="br:.npy">
+  <div class="content">
+    <div class="cat rv" style="--i:0"><i class="ic" data-i="list-checks"></i>Agenda</div>
+    <h2 class="rv" style="--i:1">Qué vamos a ver</h2>
+    <div class="body"><div class="agenda" style="margin-bottom:60px">
+      <div class="it rv" style="--i:2"><div class="bubble"><i class="ic" data-i="lightbulb"></i></div><div class="n">01</div><div class="nm">Introducción</div></div>
+      <div class="it rv" style="--i:3"><div class="bubble"><i class="ic" data-i="network"></i></div><div class="n">02</div><div class="nm">Diseño</div></div>
+      <div class="it rv" style="--i:4"><div class="bubble"><i class="ic" data-i="boxes"></i></div><div class="n">03</div><div class="nm">Tecnologías</div></div>
+      <div class="it rv" style="--i:5"><div class="bubble"><i class="ic" data-i="messages-square"></i></div><div class="n">04</div><div class="nm">Comunicación</div></div>
+      <div class="it rv" style="--i:6"><div class="bubble"><i class="ic" data-i="layout-dashboard"></i></div><div class="n">05</div><div class="nm">Producto</div></div>
+      <div class="it rv" style="--i:7"><div class="bubble"><i class="ic" data-i="activity"></i></div><div class="n">06</div><div class="nm">Observabilidad</div></div>
+      <div class="it rv" style="--i:8"><div class="bubble"><i class="ic" data-i="flag"></i></div><div class="n">07</div><div class="nm">Conclusión</div></div>
+    </div></div>
+  </div>
+</section>
+
+<!-- 3 · IDEA -->
+<section class="slide" data-arcs="tr:clip_id">
+  <div class="content">
+    <div class="cat rv" style="--i:0"><i class="ic" data-i="lightbulb"></i>Introducción · Idea</div>
+    <h2 class="rv" style="--i:1">Ver el tránsito de la ciudad,<br>esquina por esquina, en vivo</h2>
+    <div class="body flow" style="margin-top:90px; padding:0 40px">
+      <div class="step rv" style="--i:2"><div class="bubble lg b-vio"><i class="ic" data-i="cctv"></i></div><h3>Cámaras</h3><span class="label">en cada intersección</span></div>
+      <div class="arrow rv" style="--i:3"><i class="ic" data-i="arrow-right"></i></div>
+      <div class="step rv" style="--i:4"><div class="bubble lg b-mod"><i class="ic" data-i="cpu"></i></div><h3>Conteo distribuido</h3><span class="label">workers en paralelo</span></div>
+      <div class="arrow rv" style="--i:5"><i class="ic" data-i="arrow-right"></i></div>
+      <div class="step rv" style="--i:6"><div class="bubble lg"><i class="ic" data-i="map"></i></div><h3>Mapa de congestión</h3>
+        <div class="row" style="gap:12px"><span class="chip c-fluid">fluido</span><span class="chip c-mod">moderado</span><span class="chip c-crit">crítico</span></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- 4 · RELEVANCIA -->
+<section class="slide" data-arcs="tr:.npy">
+  <div class="content">
+    <div class="cat rv" style="--i:0"><i class="ic" data-i="target"></i>Introducción · Relevancia</div>
+    <h2 class="rv" style="--i:1">El volumen crece con la ciudad</h2>
+    <div class="sub rv" style="--i:2">no con la cantidad de usuarios</div>
+    <div class="body grid" style="grid-template-columns:repeat(3,1fr); align-content:center; margin-top:40px">
+      <div class="card tile rv" style="--i:3; padding:44px">
+        <div class="bubble b-vio"><i class="ic" data-i="film"></i></div>
+        <div class="big">5<small> s</small></div>
+        <div class="tag">un clip por cámara</div>
+      </div>
+      <div class="card tile rv" style="--i:4; padding:44px">
+        <div class="bubble b-mod"><i class="ic" data-i="gauge"></i></div>
+        <div class="big">60<small> clips/s</small></div>
+        <div class="tag">con 300 cámaras</div>
+      </div>
+      <div class="card tile rv" style="--i:5; padding:44px">
+        <div class="bubble b-sky"><i class="ic" data-i="hard-drive"></i></div>
+        <div class="big">0,6<small> GB/min</small></div>
+        <div class="tag">de clips almacenados</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- 5 · ALCANCE -->
+<section class="slide" data-arcs="bl:JSON">
+  <div class="content">
+    <div class="cat rv" style="--i:0"><i class="ic" data-i="ruler"></i>Introducción · Alcance</div>
+    <h2 class="rv" style="--i:1">El esfuerzo, en lo distribuido</h2>
+    <div class="body grid" style="grid-template-columns:1.25fr 1fr; gap:40px">
+      <div class="card rv" style="--i:2; padding:44px; display:flex; flex-direction:column; gap:30px">
+        <div class="label t-fluid">Dentro</div>
+        <div class="row" style="gap:24px"><div class="bubble sm b-fluid"><i class="ic" data-i="workflow"></i></div><h3 style="font-size:34px">Pipeline completo de clips</h3></div>
+        <div class="row" style="gap:24px"><div class="bubble sm b-fluid"><i class="ic" data-i="shield-check"></i></div><h3 style="font-size:34px">Autenticación y roles</h3></div>
+        <div class="row" style="gap:24px"><div class="bubble sm b-fluid"><i class="ic" data-i="map"></i></div><h3 style="font-size:34px">Mapa en tiempo real</h3></div>
+        <div class="row" style="gap:24px"><div class="bubble sm b-fluid"><i class="ic" data-i="terminal"></i></div><h3 style="font-size:34px">Demos reproducibles</h3></div>
+      </div>
+      <div class="card rv" style="--i:3; padding:44px; display:flex; flex-direction:column; gap:30px; background:var(--elevated)">
+        <div class="label">Simulado</div>
+        <div class="row" style="gap:24px"><div class="bubble sm b-gray"><i class="ic" data-i="eye"></i></div><h3 style="font-size:34px">Visión por computadora</h3></div>
+        <div class="row" style="gap:24px"><div class="bubble sm b-gray"><i class="ic" data-i="camera"></i></div><h3 style="font-size:34px">Video de las cámaras</h3></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- 6 · USO DE IA -->
+<section class="slide" data-arcs="br:ACK">
+  <div class="content">
+    <div class="cat rv" style="--i:0"><i class="ic" data-i="sparkles"></i>Introducción · Uso de IA</div>
+    <h2 class="rv" style="--i:1">La idea es nuestra,<br>la IA ayudó a refinarla</h2>
+    <div class="body" style="display:flex; flex-direction:column; gap:56px">
+      <div class="flow rv" style="--i:2; justify-content:flex-start; gap:40px">
+        <div class="card row" style="padding:28px 36px; gap:24px"><div class="bubble"><i class="ic" data-i="users"></i></div><div><div class="label">equipo</div><h3 style="font-size:38px; font-weight:800">Idea y arquitectura</h3></div></div>
+        <div class="arrow"><i class="ic" data-i="arrow-right"></i></div>
+        <div class="card row" style="padding:28px 36px; gap:30px">
+          <div class="row" style="gap:16px"><span class="logo"><i class="brand" data-b="claude"></i></span><h3 style="font-size:38px; font-weight:800">Claude</h3></div>
+          <div class="row" style="gap:16px"><span class="logo"><i class="brand" data-b="gemini"></i></span><h3 style="font-size:38px; font-weight:800">Gemini</h3></div>
+        </div>
+        <div class="arrow"><i class="ic" data-i="arrow-right"></i></div>
+        <div class="card row" style="padding:28px 36px; gap:24px"><div class="bubble b-fluid"><i class="ic" data-i="file-text"></i></div><div><div class="label">registradas</div><h3 style="font-size:38px; font-weight:800">Decisiones</h3></div></div>
+      </div>
+      <div class="rv" style="--i:3; display:flex; flex-wrap:wrap; gap:14px; max-width:1500px">
+        <span class="label" style="margin-right:10px; align-self:center">refinamos</span>
+        <span class="chip"><i class="ic" data-i="code-xml"></i>código de servicios</span>
+        <span class="chip"><i class="ic" data-i="layout-dashboard"></i>frontend</span>
+        <span class="chip"><i class="ic" data-i="terminal"></i>scripts de demo</span>
+        <span class="chip"><i class="ic" data-i="git-branch"></i>trade-offs de diseño</span>
+        <span class="chip"><i class="ic" data-i="file-text"></i>documentación</span>
+        <span class="chip c-fluid"><i class="ic" data-i="file-text"></i>D1–D17 · A1–A5 · F1–F4</span>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- 7 · CARACTERÍSTICAS SD -->
+<section class="slide" data-arcs="">
+  <div class="content">
+    <div class="cat rv" style="--i:0"><i class="ic" data-i="network"></i>Diseño · Características de los SD</div>
+    <h2 class="rv" style="--i:1">Cada característica, un mecanismo</h2>
+    <div class="body grid" style="grid-template-columns:repeat(4,1fr); margin-top:50px">
+      <div class="card tile frag"><div class="bubble sm"><i class="ic" data-i="trending-up"></i></div><h3>Escalabilidad</h3><div class="tag">--scale cv-module=N</div></div>
+      <div class="card tile frag"><div class="bubble sm b-crit"><i class="ic" data-i="heart-pulse"></i></div><h3>Tolerancia a fallos</h3><div class="tag">ACK post-commit · DLQ</div></div>
+      <div class="card tile frag"><div class="bubble sm b-mod"><i class="ic" data-i="split"></i></div><h3>Concurrencia</h3><div class="tag">competing consumers</div></div>
+      <div class="card tile frag"><div class="bubble sm b-fluid"><i class="ic" data-i="copy-check"></i></div><h3>Consistencia</h3><div class="tag">idempotencia por clip_id</div></div>
+      <div class="card tile frag"><div class="bubble sm b-sky"><i class="ic" data-i="eye"></i></div><h3>Transparencia</h3><div class="tag">un único BFF</div></div>
+      <div class="card tile frag"><div class="bubble sm b-vio"><i class="ic" data-i="lock"></i></div><h3>Seguridad</h3><div class="tag">tokens con expiración · roles</div></div>
+      <div class="card tile frag"><div class="bubble sm b-gray"><i class="ic" data-i="plug"></i></div><h3>Apertura</h3><div class="tag">contrato JSON documentado</div></div>
+      <div class="card tile frag"><div class="bubble sm b-gray"><i class="ic" data-i="container"></i></div><h3>Heterogeneidad</h3><div class="tag">Python + TS en contenedores</div></div>
+    </div>
+  </div>
+</section>
+
+<!-- 8 · ARQUITECTURA -->
+<section class="slide" data-arcs="">
+  <div class="content">
+    <div class="row rv" style="--i:0; justify-content:space-between">
+      <div class="cat"><i class="ic" data-i="waypoints"></i>Diseño · Arquitectura</div>
+      <div class="legend">
+        <span><i style="background:#2563eb"></i>HTTP</span>
+        <span><i style="background:#7c3aed"></i>Auth</span>
+        <span><i style="background:#d97706"></i>AMQP</span>
+        <span><i style="background:#059669"></i>SQL</span>
+        <span><i style="background:#0284c7"></i>S3</span>
+      </div>
+    </div>
+    <h2 class="rv" style="--i:1; font-size:64px">12 contenedores, 3 planos</h2>
+    <div class="body rv" style="--i:2; margin-top:34px">
+      <svg class="diagram" id="arch" viewBox="0 0 1680 760" preserveAspectRatio="xMidYMid meet"></svg>
+    </div>
+  </div>
+</section>
+
+<!-- 9 · RECORRIDO DEL CLIP -->
+<section class="slide" data-arcs="">
+  <div class="content">
+    <div class="cat rv" style="--i:0"><i class="ic" data-i="route"></i>Diseño · Recorrido de un clip</div>
+    <h2 class="rv" style="--i:1">De la cámara al mapa</h2>
+    <div class="body rv" style="--i:2; margin-top:80px">
+      <div class="pipe" id="pipe">
+        <svg class="line" viewBox="0 0 1680 520" preserveAspectRatio="none"></svg>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- 10 · 12-FACTOR -->
+<section class="slide" data-arcs="br:.npy">
+  <div class="content">
+    <div class="cat rv" style="--i:0"><i class="ic" data-i="settings"></i>Diseño · The Twelve-Factor App</div>
+    <h2 class="rv" style="--i:1">Siete factores aplicados</h2>
+    <div class="body grid" style="grid-template-columns:repeat(2, 1fr); grid-template-rows:repeat(4, auto); grid-auto-flow:column; gap:22px 28px; margin-top:44px; max-width:1500px">
+      <div class="card factor rv" style="--i:2"><div class="rn">III</div><div><h3>Configuración</h3><div class="tag">variables de entorno</div></div></div>
+      <div class="card factor rv" style="--i:3"><div class="rn">IV</div><div><h3>Servicios de respaldo</h3><div class="tag">hosts intercambiables</div></div></div>
+      <div class="card factor rv" style="--i:4"><div class="rn">VI</div><div><h3>Procesos sin estado</h3><div class="tag">el estado vive en colas y bases</div></div></div>
+      <div class="card factor rv" style="--i:5"><div class="rn">VIII</div><div><h3>Concurrencia</h3><div class="tag">más réplicas, no más grandes</div></div></div>
+      <div class="card factor rv" style="--i:6"><div class="rn">IX</div><div><h3>Desechabilidad</h3><div class="tag">ACK + reinicio automático</div></div></div>
+      <div class="card factor rv" style="--i:7"><div class="rn">X</div><div><h3>Paridad de entornos</h3><div class="tag">Docker en todas las máquinas</div></div></div>
+      <div class="card factor rv" style="--i:8"><div class="rn">XI</div><div><h3>Logs como flujo</h3><div class="tag">JSON a stdout + logs_queue</div></div></div>
+    </div>
+  </div>
+</section>
+
+<!-- 11 · TECNOLOGÍAS -->
+<section class="slide" data-arcs="tr:JSON">
+  <div class="content">
+    <div class="cat rv" style="--i:0"><i class="ic" data-i="boxes"></i>Tecnologías</div>
+    <h2 class="rv" style="--i:1">Cada pieza, por un motivo</h2>
+    <div class="body grid" style="grid-template-columns:repeat(4,1fr); margin-top:50px">
+      <div class="card tile frag"><div class="bubble sm"><i class="ic" data-i="zap"></i></div><h3>Python · FastAPI</h3><div class="tag">servicios livianos</div></div>
+      <div class="card tile frag"><div class="bubble sm b-sky"><i class="ic" data-i="layout-dashboard"></i></div><h3>React · Vite · TS</h3><div class="tag">consola tipada</div></div>
+      <div class="card tile frag"><div class="bubble sm b-mod"><i class="ic" data-i="inbox"></i></div><h3>RabbitMQ ×2</h3><div class="tag">colas durables + DLQ</div></div>
+      <div class="card tile frag"><div class="bubble sm b-fluid"><i class="ic" data-i="database"></i></div><h3>PostgreSQL ×2</h3><div class="tag">usuarios · resultados</div></div>
+      <div class="card tile frag"><div class="bubble sm b-vio"><i class="ic" data-i="archive"></i></div><h3>MinIO (S3)</h3><div class="tag">clips como objetos</div></div>
+      <div class="card tile frag"><div class="bubble sm b-gray"><i class="ic" data-i="cpu"></i></div><h3>NumPy · SciPy</h3><div class="tag">visión simulada</div></div>
+      <div class="card tile frag"><div class="bubble sm"><i class="ic" data-i="container"></i></div><h3>Docker Compose</h3><div class="tag">todo con un comando</div></div>
+      <div class="card tile frag"><div class="bubble sm b-gray"><i class="ic" data-i="map"></i></div><h3>Leaflet</h3><div class="tag">mapa de Montevideo</div></div>
+    </div>
+  </div>
+</section>
+
+<!-- 12 · COMUNICACIÓN -->
+<section class="slide" data-arcs="">
+  <div class="content">
+    <div class="cat rv" style="--i:0"><i class="ic" data-i="messages-square"></i>Comunicación</div>
+    <h2 class="rv" style="--i:1">Tres canales, tres casos de uso</h2>
+    <div class="body grid" style="grid-template-columns:repeat(3,1fr); margin-top:50px">
+      <div class="card comm rv" style="--i:2">
+        <div class="kind t-acc">Síncrona</div>
+        <h3>HTTP / REST</h3>
+        <div class="mini t-acc"><div class="bubble"><i class="ic" data-i="monitor"></i></div><div class="dash" style="background:var(--accent)"></div><div class="bubble"><i class="ic" data-i="server"></i></div></div>
+        <div class="label">usuario ↔ BFF ↔ servicios</div>
+        <div class="why"><span class="chip c-acc">respuesta inmediata</span><span class="chip c-acc">token por pedido</span></div>
+      </div>
+      <div class="card comm rv" style="--i:3">
+        <div class="kind t-mod">Asíncrona</div>
+        <h3>AMQP · clips</h3>
+        <div class="mini t-mod"><div class="bubble b-vio"><i class="ic" data-i="cctv"></i></div><div class="dash" style="background:var(--moderate)"></div><div class="bubble b-mod"><i class="ic" data-i="cpu"></i></div></div>
+        <div class="label">cámaras → workers</div>
+        <div class="why"><span class="chip c-mod">desacople</span><span class="chip c-mod">absorbe picos</span><span class="chip c-mod">reentrega</span></div>
+      </div>
+      <div class="card comm rv" style="--i:4">
+        <div class="kind t-mod">Asíncrona</div>
+        <h3>AMQP · logs</h3>
+        <div class="mini t-mod"><div class="bubble b-gray"><i class="ic" data-i="boxes"></i></div><div class="dash" style="background:var(--moderate)"></div><div class="bubble b-gray"><i class="ic" data-i="activity"></i></div></div>
+        <div class="label">servicios → monitoreo</div>
+        <div class="why"><span class="chip c-mod">no bloquea</span><span class="chip c-mod">broker aparte</span></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- 13 · PERSISTENCIA -->
+<section class="slide" data-arcs="">
+  <div class="content">
+    <div class="cat rv" style="--i:0"><i class="ic" data-i="database"></i>Persistencia · Claim check</div>
+    <h2 class="rv" style="--i:1">El clip no viaja por la cola</h2>
+    <div class="body" style="display:grid; grid-template-columns:1.15fr 1fr; gap:60px; align-items:center">
+      <div class="cc rv" style="--i:2">
+        <div class="obj"><div class="file"><i class="ic" data-i="film"></i></div><div class="size t-vio">≈150 KB</div><span class="chip c-vio"><i class="ic" data-i="archive"></i>MinIO</span></div>
+        <div class="obj" style="gap:28px"><div class="ticket">meta</div><div class="size t-mod">≈300 B</div><span class="chip c-mod"><i class="ic" data-i="inbox"></i>RabbitMQ</span></div>
+      </div>
+      <div class="grid rv" style="--i:3; gap:22px">
+        <div class="card row" style="padding:28px 32px; gap:26px"><div class="bubble sm b-vio"><i class="ic" data-i="archive"></i></div><div><h3 style="font-size:32px">clips-db · MinIO</h3><div class="label" style="margin-top:6px; text-transform:none; letter-spacing:0">clips .npy por cámara</div></div></div>
+        <div class="card row" style="padding:28px 32px; gap:26px"><div class="bubble sm b-fluid"><i class="ic" data-i="database"></i></div><div><h3 style="font-size:32px">results-db · PostgreSQL</h3><div class="label" style="margin-top:6px; text-transform:none; letter-spacing:0">un resultado por clip</div></div></div>
+        <div class="card row" style="padding:28px 32px; gap:26px"><div class="bubble sm b-vio"><i class="ic" data-i="key-round"></i></div><div><h3 style="font-size:32px">auth-db · PostgreSQL</h3><div class="label" style="margin-top:6px; text-transform:none; letter-spacing:0">usuarios y sesiones</div></div></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- 14 · TOLERANCIA A FALLOS -->
+<section class="slide" data-arcs="tr:ACK">
+  <div class="content">
+    <div class="cat rv" style="--i:0"><i class="ic" data-i="heart-pulse"></i>Tolerancia a fallos y consistencia</div>
+    <h2 class="rv" style="--i:1">Ningún clip perdido,<br>ninguno contado dos veces</h2>
+    <div class="body grid eq" style="grid-template-columns:repeat(4,1fr); margin-top:60px">
+      <div class="card tile rv" style="--i:2"><div class="bubble b-fluid"><i class="ic" data-i="circle-check"></i></div><h3>ACK después del commit</h3><div class="tag">si el worker muere, se reentrega</div></div>
+      <div class="card tile rv" style="--i:3"><div class="bubble"><i class="ic" data-i="fingerprint"></i></div><h3>Idempotencia</h3><div class="tag">ON CONFLICT (clip_id)</div></div>
+      <div class="card tile rv" style="--i:4"><div class="bubble b-crit"><i class="ic" data-i="octagon-x"></i></div><h3>Dead-letter queue</h3><div class="tag">el fallo no traba la cola</div></div>
+      <div class="card tile rv" style="--i:5"><div class="bubble b-mod"><i class="ic" data-i="refresh-cw"></i></div><h3>Reinicio y reconexión</h3><div class="tag">unless-stopped · reintentos</div></div>
+    </div>
+  </div>
+</section>
+
+<!-- 15 · ESCALABILIDAD -->
+<section class="slide" data-arcs="">
+  <div class="content">
+    <div class="cat rv" style="--i:0"><i class="ic" data-i="trending-up"></i>Escalabilidad</div>
+    <h2 class="rv" style="--i:1">Escalar es un comando</h2>
+    <div class="rv" style="--i:2; margin-top:26px"><span class="chip" style="font-size:26px; padding:14px 26px"><i class="ic" data-i="terminal"></i>docker compose up -d --scale cv-module=3</span></div>
+    <div class="body" style="display:grid; grid-template-columns:1fr 1fr 1.1fr; gap:28px; margin-top:50px">
+      <div class="card tile rv" style="--i:3; padding:40px">
+        <div class="label">1 worker</div>
+        <div class="big t-crit">+2,5<small> msg/s</small></div>
+        <div class="tag">la cola crece sin parar</div>
+      </div>
+      <div class="card tile rv" style="--i:4; padding:40px">
+        <div class="label">3 workers</div>
+        <div class="big t-fluid">0<small> en cola</small></div>
+        <div class="tag">se vacía en ~55 s</div>
+      </div>
+      <div class="card tile rv" style="--i:5; padding:40px; align-items:center">
+        <div class="label" style="align-self:flex-start">Reparto entre réplicas</div>
+        <div style="margin-top:56px">
+          <div class="bars"><div class="b" style="height:173px"><span>173</span></div><div class="b" style="height:170px"><span>170</span></div><div class="b" style="height:170px"><span>170</span></div></div>
+          <div class="bars-l"><span>#1</span><span>#2</span><span>#3</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- 16 · EVIDENCIA -->
+<section class="slide" data-arcs="tr:.npy">
+  <div class="content">
+    <div class="cat rv" style="--i:0"><i class="ic" data-i="terminal"></i>Evidencia · 5 demos reproducibles</div>
+    <h2 class="rv" style="--i:1">Medido, no supuesto</h2>
+    <div class="body grid" style="grid-template-columns:repeat(5,1fr); gap:24px">
+      <div class="card tile rv" style="--i:2"><div class="bubble sm"><i class="ic" data-i="trending-up"></i></div><div class="big" style="font-size:84px">1→3</div><h3 style="font-size:30px">Escalado</h3></div>
+      <div class="card tile rv" style="--i:3"><div class="bubble sm b-crit"><i class="ic" data-i="heart-pulse"></i></div><div class="big" style="font-size:84px">36=36</div><h3 style="font-size:30px">Worker caído</h3></div>
+      <div class="card tile rv" style="--i:4"><div class="bubble sm b-fluid"><i class="ic" data-i="fingerprint"></i></div><div class="big" style="font-size:84px">3→1</div><h3 style="font-size:30px">Idempotencia</h3></div>
+      <div class="card tile rv" style="--i:5"><div class="bubble sm b-crit"><i class="ic" data-i="octagon-x"></i></div><div class="big" style="font-size:84px">DLQ</div><h3 style="font-size:30px">Mensaje fallido</h3></div>
+      <div class="card tile rv" style="--i:6"><div class="bubble sm b-mod"><i class="ic" data-i="gauge"></i></div><div class="big" style="font-size:84px">300</div><h3 style="font-size:30px">Cámaras en carga</h3></div>
+    </div>
+  </div>
+</section>
+
+<!-- 17 · PRODUCTO: MAPA -->
+<section class="slide" data-arcs="">
+  <div class="content">
+    <div class="cat rv" style="--i:0"><i class="ic" data-i="layout-dashboard"></i>Producto · 4 funcionalidades</div>
+    <div class="body" style="display:grid; grid-template-columns:480px 1fr; gap:60px; margin-top:40px; align-items:center">
+      <div style="display:flex; flex-direction:column; gap:30px">
+        <h2 class="rv" style="--i:1; margin:0; font-size:66px">Lo que ve<br>el operador</h2>
+        <div class="row rv" style="--i:2; gap:22px"><div class="bubble sm b-vio"><i class="ic" data-i="lock"></i></div><h3 style="font-size:32px">Login y roles</h3></div>
+        <div class="row rv" style="--i:3; gap:22px"><div class="bubble sm"><i class="ic" data-i="map"></i></div><h3 style="font-size:32px">Mapa en vivo</h3></div>
+        <div class="row rv" style="--i:4; gap:22px"><div class="bubble sm b-fluid"><i class="ic" data-i="chart-column"></i></div><h3 style="font-size:32px">Historial por esquina</h3></div>
+        <div class="row rv" style="--i:5; gap:22px"><div class="bubble sm b-mod"><i class="ic" data-i="activity"></i></div><h3 style="font-size:32px">Salud del sistema</h3></div>
+      </div>
+      <div class="shot rv" style="--i:3"><img src="img/dashboard.png" alt="Mapa de intersecciones de Montevideo con su estado de congestión"></div>
+    </div>
+  </div>
+</section>
+
+<!-- 18 · PRODUCTO: DETALLE -->
+<section class="slide" data-arcs="">
+  <div class="content">
+    <div class="cat rv" style="--i:0"><i class="ic" data-i="chart-column"></i>Producto · Detalle de una intersección</div>
+    <div class="body rv" style="--i:1; margin-top:36px; display:flex; justify-content:center">
+      <div class="shot" style="width:1560px"><img src="img/detalle.png" alt="Detalle de una intersección con su gráfico de vehículos por clip"></div>
+    </div>
+  </div>
+</section>
+
+<!-- 19 · PRODUCTO: SISTEMA -->
+<section class="slide" data-arcs="">
+  <div class="content">
+    <div class="cat rv" style="--i:0"><i class="ic" data-i="shield-check"></i>Producto · Vista de sistema (Administrador)</div>
+    <div class="body rv" style="--i:1; margin-top:36px; display:flex; justify-content:center">
+      <div class="shot" style="width:1560px"><img src="img/sistema.png" alt="Diagrama de componentes en vivo de la vista de administrador"></div>
+    </div>
+  </div>
+</section>
+
+<!-- 20 · OBSERVABILIDAD -->
+<section class="slide" data-arcs="">
+  <div class="content">
+    <div class="cat rv" style="--i:0"><i class="ic" data-i="activity"></i>Observabilidad · Pilar: logs</div>
+    <h2 class="rv" style="--i:1">Un formato, una traza por clip</h2>
+    <div class="body" style="display:grid; grid-template-columns:1fr 1fr; gap:50px; margin-top:50px">
+      <div class="card logline rv" style="--i:2">
+        <div>{ <span class="k">"service"</span>: <span class="s">"cv-module"</span>,</div>
+        <div>&nbsp;&nbsp;<span class="k">"event"</span>: <span class="s">"clip_processed"</span>,</div>
+        <div>&nbsp;&nbsp;<span class="k">"trace_id"</span>: <span class="h">"3f2b8c1e…"</span>,</div>
+        <div>&nbsp;&nbsp;<span class="k">"duration_ms"</span>: <span class="n">4</span>, … }</div>
+      </div>
+      <div class="rv" style="--i:3; display:flex; flex-direction:column; gap:20px">
+        <div class="row" style="gap:20px"><div class="bubble sm b-vio"><i class="ic" data-i="cctv"></i></div><span class="chip">clip_published</span></div>
+        <div class="row" style="gap:20px; padding-left:40px"><div class="bubble sm b-mod"><i class="ic" data-i="cpu"></i></div><span class="chip">clip_processed</span></div>
+        <div class="row" style="gap:20px; padding-left:80px"><div class="bubble sm b-crit"><i class="ic" data-i="octagon-x"></i></div><span class="chip">clip_dead_lettered</span></div>
+        <div class="row" style="gap:14px; margin-top:6px"><span class="chip c-vio"><i class="ic" data-i="fingerprint"></i>mismo trace_id en todos los servicios</span></div>
+      </div>
+    </div>
+    <div class="row rv" style="--i:4; gap:16px; margin-top:20px">
+      <span class="chip c-fluid"><i class="ic" data-i="circle-check"></i>stdout + logs_queue</span>
+      <span class="chip c-fluid"><i class="ic" data-i="circle-check"></i>envío asíncrono</span>
+      <span class="chip c-mod"><i class="ic" data-i="clock"></i>métricas y dashboards: en curso</span>
+    </div>
+  </div>
+</section>
+
+<!-- 21 · CONCLUSIÓN -->
+<section class="slide" data-arcs="br:.npy">
+  <div class="content">
+    <div class="cat rv" style="--i:0"><i class="ic" data-i="flag"></i>Conclusión</div>
+    <h2 class="rv" style="--i:1">Lo que aprendimos</h2>
+    <div class="body" style="display:flex; flex-direction:column; gap:34px; margin-top:60px">
+      <div class="row rv" style="--i:2; gap:34px"><div class="bubble b-fluid"><i class="ic" data-i="copy-check"></i></div><h3 style="font-size:44px; font-weight:700; letter-spacing:-0.02em">At-least-once + idempotencia = cero pérdidas, cero duplicados</h3></div>
+      <div class="row rv" style="--i:3; gap:34px"><div class="bubble"><i class="ic" data-i="trending-up"></i></div><h3 style="font-size:44px; font-weight:700; letter-spacing:-0.02em">Escalar donde está el costo, no en todo</h3></div>
+      <div class="row rv" style="--i:4; gap:34px"><div class="bubble b-mod"><i class="ic" data-i="eye"></i></div><h3 style="font-size:44px; font-weight:700; letter-spacing:-0.02em">El cuello de botella es la visión, no la mensajería</h3></div>
+    </div>
+    <div class="rv" style="--i:5; display:flex; flex-wrap:wrap; gap:14px; align-items:center; max-width:1250px">
+      <span class="label" style="margin-right:10px">Trabajo futuro</span>
+      <span class="chip">CV real</span><span class="chip">store-and-forward</span><span class="chip">reintentos antes de DLQ</span><span class="chip">retención en MinIO</span><span class="chip">Prometheus · Grafana</span>
+    </div>
+  </div>
+</section>
+
+<!-- 22 · PREGUNTAS -->
+<section class="slide" data-arcs="midtr:.npy,tl:ACK">
+  <div class="content" style="justify-content:center">
+    <div class="lights rv" style="--i:0"><span style="background:var(--critical)"></span><span style="background:var(--moderate)"></span><span style="background:var(--fluid)"></span></div>
+    <h1 class="rv" style="--i:1; font-size:170px; margin-top:44px">¿Preguntas?</h1>
+    <div class="sub rv" style="--i:2; font-size:40px; margin-top:30px">Muchas gracias</div>
+  </div>
+</section>
+
+<div id="footer"><span>SGTU · Sistemas Distribuidos</span><span id="counter"></span></div>
+<div id="progress"></div>
+</div>
+
+<script src="icons.js"></script>
+<script>
+(function () {
+  var NS = 'http://www.w3.org/2000/svg';
+  var uid = 0;
+  function el(tag, attrs, parent) {
+    var e = document.createElementNS(NS, tag);
+    for (var k in attrs) e.setAttribute(k, attrs[k]);
+    if (parent) parent.appendChild(e);
+    return e;
+  }
+  function iconSvg(name) {
+    return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">' + (ICONS[name] || '') + '</svg>';
+  }
+
+  /* Iconos */
+  document.querySelectorAll('i[data-i]').forEach(function (n) { n.innerHTML = iconSvg(n.dataset.i); });
+
+  /* Logos de Claude y Gemini (trazados de simple-icons) */
+  var BRANDS = {
+    claude: '<svg viewBox="0 0 24 24"><path fill="#D97757" d="m4.7144 15.9555 4.7174-2.6471.079-.2307-.079-.1275h-.2307l-.7893-.0486-2.6956-.0729-2.3375-.0971-2.2646-.1214-.5707-.1215-.5343-.7042.0546-.3522.4797-.3218.686.0608 1.5179.1032 2.2767.1578 1.6514.0972 2.4468.255h.3886l.0546-.1579-.1336-.0971-.1032-.0972L6.973 9.8356l-2.55-1.6879-1.3356-.9714-.7225-.4918-.3643-.4614-.1578-1.0078.6557-.7225.8803.0607.2246.0607.8925.686 1.9064 1.4754 2.4893 1.8336.3643.3035.1457-.1032.0182-.0728-.164-.2733-1.3539-2.4467-1.445-2.4893-.6435-1.032-.17-.6194c-.0607-.255-.1032-.4674-.1032-.7285L6.287.1335 6.6997 0l.9957.1336.419.3642.6192 1.4147 1.0018 2.2282 1.5543 3.0296.4553.8985.2429.8318.091.255h.1579v-.1457l.1275-1.706.2368-2.0947.2307-2.6957.0789-.7589.3764-.9107.7468-.4918.5828.2793.4797.686-.0668.4433-.2853 1.8517-.5586 2.9021-.3643 1.9429h.2125l.2429-.2429.9835-1.3053 1.6514-2.0643.7286-.8196.85-.9046.5464-.4311h1.0321l.759 1.1293-.34 1.1657-1.0625 1.3478-.8804 1.1414-1.2628 1.7-.7893 1.36.0729.1093.1882-.0183 2.8535-.607 1.5421-.2794 1.8396-.3157.8318.3886.091.3946-.3278.8075-1.967.4857-2.3072.4614-3.4364.8136-.0425.0304.0486.0607 1.5482.1457.6618.0364h1.621l3.0175.2247.7892.522.4736.6376-.079.4857-1.2142.6193-1.6393-.3886-3.825-.9107-1.3113-.3279h-.1822v.1093l1.0929 1.0686 2.0035 1.8092 2.5075 2.3314.1275.5768-.3218.4554-.34-.0486-2.2039-1.6575-.85-.7468-1.9246-1.621h-.1275v.17l.4432.6496 2.3436 3.5214.1214 1.0807-.17.3521-.6071.2125-.6679-.1214-1.3721-1.9246L14.38 17.959l-1.1414-1.9428-.1397.079-.674 7.2552-.3156.3703-.7286.2793-.6071-.4614-.3218-.7468.3218-1.4753.3886-1.9246.3157-1.53.2853-1.9004.17-.6314-.0121-.0425-.1397.0182-1.4328 1.9672-2.1796 2.9446-1.7243 1.8456-.4128.164-.7164-.3704.0667-.6618.4008-.5889 2.386-3.0357 1.4389-1.882.929-1.0868-.0062-.1579h-.0546l-6.3385 4.1164-1.1293.1457-.4857-.4554.0608-.7467.2307-.2429 1.9064-1.3114Z"/></svg>',
+    gemini: '<svg viewBox="0 0 24 24"><defs><linearGradient id="gem-g" x1="0" y1="1" x2="1" y2="0"><stop offset="0" stop-color="#1C7DFF"/><stop offset=".52" stop-color="#9168C0"/><stop offset="1" stop-color="#E2687A"/></linearGradient></defs><path fill="url(#gem-g)" d="M11.04 19.32Q12 21.51 12 24q0-2.49.93-4.68.96-2.19 2.58-3.81t3.81-2.55Q21.51 12 24 12q-2.49 0-4.68-.93a12.3 12.3 0 0 1-3.81-2.58 12.3 12.3 0 0 1-2.58-3.81Q12 2.49 12 0q0 2.49-.96 4.68-.93 2.19-2.55 3.81a12.3 12.3 0 0 1-3.81 2.58Q2.49 12 0 12q2.49 0 4.68.96 2.19.93 3.81 2.55t2.55 3.81"/></svg>'
+  };
+  document.querySelectorAll('i[data-b]').forEach(function (n) { n.innerHTML = BRANDS[n.dataset.b]; });
+
+  /* Paquete que viaja por un path: punto con halo + etiqueta corta + estela.
+     Va en una capa debajo del contenido, así nunca tapa nada. */
+  function addPacket(svg, path, o) {
+    var id = path.id || (path.id = 'p' + (++uid));
+    var len = path.getTotalLength();
+    var dur = o.dur || Math.max(8, len / (o.speed || 70));
+    var begin = (-(o.offset || 0) * dur).toFixed(2) + 's';
+    var color = o.color || '#8b5cf6';
+    var s = o.scale || 1;
+
+    if (o.trail !== false) {
+      var tr = el('path', { d: path.getAttribute('d'), fill: 'none', stroke: color, 'stroke-width': 3 * s, 'stroke-linecap': 'round', 'stroke-opacity': 0.55, pathLength: 1, 'stroke-dasharray': '0.07 1.2' }, svg);
+      el('animate', { attributeName: 'stroke-dashoffset', values: '0.07;-0.93', dur: dur + 's', begin: begin, repeatCount: 'indefinite' }, tr);
+    }
+    var g = el('g', {}, svg);
+    el('circle', { r: 14 * s, fill: color, 'fill-opacity': 0.16 }, g);
+    el('circle', { r: 7.5 * s, fill: color }, g);
+    el('circle', { r: 2.8 * s, fill: '#ffffff' }, g);
+    if (o.label) {
+      var w = (o.label.length * 10.5 + 22) * s, h = 26 * s;
+      var b = el('g', { transform: 'translate(0,' + (30 * s) + ')' }, g);
+      el('rect', { x: -w / 2, y: -h / 2, width: w, height: h, rx: 7 * s, class: 'pk-badge', stroke: color }, b);
+      var t = el('text', { x: 0, y: 1, class: 'pk-text', fill: color, 'font-size': 16 * s }, b);
+      t.textContent = o.label;
+    }
+    var am = el('animateMotion', { dur: dur + 's', begin: begin, repeatCount: 'indefinite', rotate: '0' }, g);
+    el('mpath', { href: '#' + id }, am);
+  }
+
+  /* Arcos de fondo: entran por un borde y salen por otro */
+  var ARCS = {
+    br:    'M 1150 1140 C 1430 960, 1700 820, 1990 690',
+    tr:    'M 1330 -60 C 1540 110, 1760 250, 1990 320',
+    tl:    'M -70 300 C 70 210, 220 90, 420 -70',
+    bl:    'M -70 800 C 180 900, 380 1010, 620 1150',
+    midtr: 'M 860 1150 C 1120 760, 1500 320, 1990 140'
+  };
+  document.querySelectorAll('.slide').forEach(function (slide) {
+    var spec = (slide.dataset.arcs || '').split(',').filter(Boolean);
+    if (!spec.length) return;
+    var svg = el('svg', { class: 'arcs', viewBox: '0 0 1920 1080', preserveAspectRatio: 'none' });
+    slide.insertBefore(svg, slide.firstChild.nextSibling);
+    spec.forEach(function (s, i) {
+      var parts = s.split(':');
+      var d = ARCS[parts[0]];
+      el('path', { d: d, fill: 'none', stroke: '#7c3aed', 'stroke-opacity': 0.06, 'stroke-width': 14, 'stroke-linecap': 'round' }, svg);
+      var p = el('path', { d: d, fill: 'none', stroke: '#7c3aed', 'stroke-opacity': 0.22, 'stroke-width': 2, 'stroke-linecap': 'round' }, svg);
+      p.id = 'arc' + (++uid);
+      addPacket(svg, p, { label: parts[1], speed: 62, offset: i * 0.37 + 0.15 });
+    });
+  });
+
+  /* Diagrama de arquitectura (mismo trazado en tres planos que la vista de sistema) */
+  var C = { http: '#2563eb', auth: '#7c3aed', amqp: '#d97706', sql: '#059669', s3: '#0284c7', dlq: '#dc2626' };
+  var NODES = [
+    { id: 'authdb', x: 160, y: 90, icon: 'key-round', t: 'auth-db', p: 'PostgreSQL', c: C.sql },
+    { id: 'auth', x: 500, y: 90, icon: 'shield-check', t: 'auth-service', p: 'FastAPI :8005', c: C.auth },
+    { id: 'api', x: 840, y: 90, icon: 'server', t: 'api-rest (BFF)', p: 'FastAPI :8000', c: C.http },
+    { id: 'front', x: 1520, y: 90, icon: 'monitor', t: 'frontend', p: 'React :3000', c: C.http },
+    { id: 'edge', x: 160, y: 380, icon: 'cctv', t: 'edge-processor', p: 'cámaras :8001', c: C.amqp },
+    { id: 'queue', x: 500, y: 380, icon: 'inbox', t: 'camera-queue', p: 'RabbitMQ', c: C.amqp },
+    { id: 'cv', x: 840, y: 380, icon: 'cpu', t: 'cv-module ×N', p: 'workers', c: C.sql },
+    { id: 'res', x: 1180, y: 380, icon: 'database', t: 'results-db', p: 'PostgreSQL', c: C.sql },
+    { id: 'viz', x: 1520, y: 380, icon: 'chart-column', t: 'visualization', p: 'FastAPI :8003', c: C.http },
+    { id: 'clips', x: 160, y: 650, icon: 'archive', t: 'clips-db', p: 'MinIO S3', c: C.s3 },
+    { id: 'dlq', x: 500, y: 650, icon: 'octagon-x', t: 'camera_dlq', p: 'dead-letter', c: C.dlq },
+    { id: 'logs', x: 1180, y: 650, icon: 'scroll-text', t: 'logs-queue', p: 'RabbitMQ', c: C.amqp },
+    { id: 'mon', x: 1520, y: 650, icon: 'activity', t: 'monitoring', p: 'FastAPI :8004', c: C.amqp }
+  ];
+  var W = 290, H = 104;
+  var LINKS = [
+    { d: 'M 1375 90 H 985', c: C.http, l: 'HTTP / JSON', lx: 1180, ly: 70, pk: 'JSON' },
+    { d: 'M 695 90 H 645', c: C.auth },
+    { d: 'M 355 90 H 305', c: C.auth },
+    { d: 'M 880 142 V 236 H 1520 V 328', c: C.http, l: 'HTTP', lx: 1200, ly: 222, pk: 'JSON' },
+    { d: 'M 305 380 H 355', c: C.amqp },
+    { d: 'M 645 380 H 695', c: C.amqp, pk: 'msg' },
+    { d: 'M 985 380 H 1035', c: C.sql },
+    { d: 'M 1375 380 H 1325', c: C.sql },
+    { d: 'M 160 432 V 598', c: C.s3, l: 'PUT .npy', lx: 178, ly: 520, a: 'start', pk: '.npy' },
+    { d: 'M 160 702 V 738 H 800 V 432', c: C.s3, l: 'GET .npy', lx: 640, ly: 728, pk: '.npy' },
+    { d: 'M 500 432 V 610', c: C.dlq, l: 'nack', lx: 518, ly: 525, a: 'start' },
+    { d: 'M 900 432 V 650 H 1035', c: C.amqp, dash: true, l: 'logs JSON', lx: 918, ly: 540, a: 'start', pk: 'log' },
+    { d: 'M 1325 650 H 1375', c: C.amqp }
+  ];
+  var arch = document.getElementById('arch');
+  [['PLANO 01 · USUARIO', 20], ['PLANO 02 · PROCESAMIENTO', 310], ['PLANO 03 · ALMACENAMIENTO Y OBSERVABILIDAD', 580]].forEach(function (pl) {
+    el('rect', { x: 0, y: pl[1], width: 1680, height: 142, rx: 18, class: 'plane' }, arch);
+    el('text', { x: 18, y: pl[1] - 8, class: 'plane-l' }, arch).textContent = pl[0];
+  });
+  var wireLayer = el('g', {}, arch);
+  var nodeLayer = el('g', {}, arch);
+  var pkLayer = el('g', {}, arch);
+  LINKS.forEach(function (L, i) {
+    el('path', { d: L.d, class: 'halo', stroke: L.c }, wireLayer);
+    var p = el('path', { d: L.d, class: 'wire', stroke: L.c, 'stroke-dasharray': L.dash ? '8 8' : 'none' }, wireLayer);
+    p.id = 'w' + i;
+    if (L.l) el('text', { x: L.lx, y: L.ly, class: 'wl', 'text-anchor': L.a || 'middle' }, wireLayer).textContent = L.l;
+    if (L.pk) addPacket(pkLayer, p, { label: L.pk, color: L.c, speed: 55, offset: (i * 0.29) % 1, scale: 0.8, trail: false });
+  });
+  // los paquetes pasan por debajo de las tarjetas
+  arch.appendChild(pkLayer); arch.appendChild(nodeLayer);
+  NODES.forEach(function (n) {
+    var w = n.id === 'dlq' ? 250 : W;
+    var g = el('g', { class: 'node', transform: 'translate(' + (n.x - w / 2) + ',' + (n.y - H / 2) + ')' }, nodeLayer);
+    el('rect', { class: 'bg', width: w, height: H, rx: 16, stroke: n.c, 'stroke-opacity': 0.55 }, g);
+    el('rect', { x: 18, y: 24, width: 56, height: 56, rx: 14, fill: n.c, 'fill-opacity': 0.11 }, g);
+    var ic = el('g', { transform: 'translate(30,36) scale(1.35)', color: n.c }, g);
+    ic.innerHTML = '<g fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">' + ICONS[n.icon] + '</g>';
+    el('text', { x: 90, y: 47, class: 't' }, g).textContent = n.t;
+    el('text', { x: 90, y: 75, class: 'p' }, g).textContent = n.p;
+  });
+
+  /* Recorrido del clip */
+  var STEPS = [
+    ['cctv', 'Captura', '1 clip / 5 s', '#7c3aed'],
+    ['sliders-horizontal', 'Preproceso', 'descarta y reduce', '#7c3aed'],
+    ['archive', 'MinIO', 'guarda el .npy', '#0284c7'],
+    ['inbox', 'Cola', 'mensaje persistente', '#d97706'],
+    ['cpu', 'Worker', 'cuenta vehículos', '#d97706'],
+    ['database', 'Commit + ACK', 'una fila por clip', '#059669'],
+    ['map', 'Mapa', 'cada 5 s', '#2563eb']
+  ];
+  var pipe = document.getElementById('pipe');
+  var line = pipe.querySelector('svg');
+  var xs = STEPS.map(function (_, i) { return 120 + i * (1440 / 6); });
+  var cy = 135;
+  var lp = el('path', { d: 'M -40 ' + cy + ' H 1720', fill: 'none', stroke: '#7c3aed', 'stroke-opacity': 0.25, 'stroke-width': 3, 'stroke-dasharray': '2 10', 'stroke-linecap': 'round' }, line);
+  lp.id = 'pipe-line';
+  addPacket(line, lp, { label: 'clip', dur: 16, offset: 0.25 });
+  STEPS.forEach(function (s, i) {
+    var d = document.createElement('div');
+    d.className = 'st';
+    d.style.left = (xs[i] / 1680 * 100) + '%';
+    d.innerHTML = '<div class="circle" style="color:' + s[3] + ';border-color:' + s[3] + '55">' + '<i class="ic">' + iconSvg(s[0]) + '</i></div>' +
+      '<div class="num">0' + (i + 1) + '</div><h3>' + s[1] + '</h3><div class="tag">' + s[2] + '</div>';
+    pipe.appendChild(d);
+  });
+
+  /* Navegación */
+  var stage = document.getElementById('stage');
+  var slides = Array.prototype.slice.call(document.querySelectorAll('.slide'));
+  var counter = document.getElementById('counter');
+  var progress = document.getElementById('progress');
+  var cur = 0;
+  function fit() {
+    var s = Math.min(window.innerWidth / 1920, window.innerHeight / 1080);
+    stage.style.transform = 'scale(' + s + ') translate(-50%, -50%)';
+  }
+  function frags() { return Array.prototype.slice.call(slides[cur].querySelectorAll('.frag')); }
+  function show(i, revealAll) {
+    cur = Math.max(0, Math.min(slides.length - 1, i));
+    slides.forEach(function (el, n) { el.classList.toggle('active', n === cur); });
+    frags().forEach(function (f) { f.classList.toggle('on', !!revealAll); });
+    counter.textContent = (cur + 1) + ' / ' + slides.length;
+    progress.style.width = ((cur + 1) / slides.length * 100) + '%';
+    document.body.classList.toggle('cover-mode', cur === 0 || cur === slides.length - 1);
+    try { history.replaceState(null, '', '#' + (cur + 1)); } catch (e) {}
+  }
+  // avanzar: primero muestra el próximo bloque oculto de la diapositiva; si no queda ninguno, pasa a la siguiente
+  function next() {
+    var hidden = frags().filter(function (f) { return !f.classList.contains('on'); });
+    if (hidden.length) hidden[0].classList.add('on'); else show(cur + 1);
+  }
+  function prev() {
+    var shown = frags().filter(function (f) { return f.classList.contains('on'); });
+    if (shown.length) shown[shown.length - 1].classList.remove('on'); else show(cur - 1, true);
+  }
+  document.addEventListener('keydown', function (e) {
+    if (e.metaKey || e.ctrlKey || e.altKey) return;
+    var k = e.key;
+    if (k === 'ArrowRight' || k === 'ArrowDown' || k === 'PageDown' || k === ' ' || k === 'Enter') { e.preventDefault(); next(); }
+    else if (k === 'ArrowLeft' || k === 'ArrowUp' || k === 'PageUp' || k === 'Backspace') { e.preventDefault(); prev(); }
+    else if (k === 'Home') show(0);
+    else if (k === 'End') show(slides.length - 1);
+    else if (k === 'f' || k === 'F') {
+      if (document.fullscreenElement) document.exitFullscreen();
+      else if (document.documentElement.requestFullscreen) document.documentElement.requestFullscreen();
+    }
+  });
+  stage.addEventListener('click', function (e) {
+    var r = stage.getBoundingClientRect();
+    if ((e.clientX - r.left) < r.width * 0.3) prev(); else next();
+  });
+  var tx = null;
+  document.addEventListener('touchstart', function (e) { tx = e.touches[0].clientX; }, { passive: true });
+  document.addEventListener('touchend', function (e) {
+    if (tx === null) return;
+    var dx = e.changedTouches[0].clientX - tx; tx = null;
+    if (Math.abs(dx) > 40) { if (dx < 0) next(); else prev(); }
+  });
+  window.addEventListener('resize', fit);
+  fit();
+  show((parseInt(location.hash.slice(1), 10) || 1) - 1);
+
+  window.__go = function (n) { show(n - 1, true); };
+
+  /* Para exportar a PDF: congela las animaciones con los paquetes a mitad de camino */
+  window.__freeze = function (t) {
+    document.querySelectorAll('svg').forEach(function (s) { if (s.pauseAnimations) { s.pauseAnimations(); s.setCurrentTime(t); } });
+  };
+})();
+</script>
+</body>
+</html>

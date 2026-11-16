@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<title>guion · SGTU</title>
+<style>
+  @font-face { font-family: 'Inter'; font-weight: 400; src: url(fonts/inter-latin-400-normal.woff2) format('woff2'); }
+  @font-face { font-family: 'Inter'; font-weight: 600; src: url(fonts/inter-latin-600-normal.woff2) format('woff2'); }
+  @font-face { font-family: 'Inter'; font-weight: 800; src: url(fonts/inter-latin-800-normal.woff2) format('woff2'); }
+  @font-face { font-family: 'JetBrains Mono'; font-weight: 500; src: url(fonts/jetbrains-mono-latin-500-normal.woff2) format('woff2'); }
+  @page { size: A4; margin: 16mm 16mm 14mm; }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: 'Inter', sans-serif; color: #0f172a; font-size: 10pt; line-height: 1.42; background: #fff; }
+  header { display: flex; align-items: baseline; justify-content: space-between; border-bottom: 2px solid #0f172a; padding-bottom: 8px; margin-bottom: 14px; }
+  h1 { font-size: 20pt; font-weight: 800; letter-spacing: -0.02em; }
+  header p { font-size: 9.5pt; color: #64748b; }
+  .lights { display: inline-flex; gap: 5px; margin-right: 10px; vertical-align: 3px; }
+  .lights i { width: 9px; height: 9px; border-radius: 50%; display: inline-block; }
+  .tip { background: #f1f5f9; border-radius: 8px; padding: 8px 12px; font-size: 9.5pt; color: #334155; margin-bottom: 12px; }
+  .s { display: grid; grid-template-columns: 34px 1fr; gap: 10px; padding: 5px 0; border-bottom: 1px solid #e2e8f0; break-inside: avoid; }
+  .n { font-family: 'JetBrains Mono', monospace; font-weight: 500; font-size: 10pt; color: #2563eb; padding-top: 1px; }
+  .t { font-weight: 600; margin-bottom: 1px; }
+  .t span { font-weight: 400; color: #7c3aed; font-size: 9pt; margin-left: 6px; }
+  .d { color: #334155; }
+</style>
+</head>
+<body>
+<header>
+  <h1><span class="lights"><i style="background:#dc2626"></i><i style="background:#d97706"></i><i style="background:#059669"></i></span>guion de la presentación</h1>
+  <p>SGTU · sistemas distribuidos</p>
+</header>
+
+<div class="tip">es una guía, no un texto para leer. la idea es que cada uno sepa qué contar en cada diapo, con sus palabras. en las diapos 7 y 11 los bloques aparecen de a uno: un click (o flecha) por bloque.</div>
+
+<div class="s"><div class="n">01</div><div><div class="t">portada</div><div class="d">nos presentamos y contamos en una frase qué es: un sistema para ver el tránsito de montevideo en tiempo real, con cámaras en las esquinas.</div></div></div>
+
+<div class="s"><div class="n">02</div><div><div class="t">agenda</div><div class="d">vamos en el mismo orden que pide la consigna: idea, diseño, tecnologías, comunicación, producto, observabilidad y cierre.</div></div></div>
+
+<div class="s"><div class="n">03</div><div><div class="t">idea</div><div class="d">las cámaras mandan clips, varios workers cuentan los autos en paralelo y el operador ve un mapa con cada esquina en verde, amarillo o rojo.</div></div></div>
+
+<div class="s"><div class="n">04</div><div><div class="t">relevancia</div><div class="d">la carga crece con la ciudad, no con los usuarios. cada cámara manda un clip cada 5 segundos: con 300 cámaras son 60 clips por segundo y unos 0,6 GB de video por minuto. eso no entra en una sola máquina.</div></div></div>
+
+<div class="s"><div class="n">05</div><div><div class="t">alcance</div><div class="d">hicimos el pipeline completo, login con roles, el mapa en vivo y demos que se pueden repetir. la visión por computadora y el video están simulados, porque el foco está en la parte distribuida.</div></div></div>
+
+<div class="s"><div class="n">06</div><div><div class="t">uso de IA</div><div class="d">la idea y la arquitectura las pensamos nosotros. después las fuimos refinando con claude y gemini: código, trade-offs, scripts y documentación. cada decisión quedó escrita en docs.</div></div></div>
+
+<div class="s"><div class="n">07</div><div><div class="t">características de los SD <span>un bloque por click</span></div><div class="d">una por bloque: escalamos sumando workers; si un worker se cae no se pierde nada (ACK y DLQ); varios workers comparten la cola; cada clip tiene un id único y no se cuenta dos veces; el usuario solo habla con el BFF; hay tokens que vencen y roles; el contrato del mensaje está documentado; y mezclamos python y typescript, todo en contenedores.</div></div></div>
+
+<div class="s"><div class="n">08</div><div><div class="t">arquitectura</div><div class="d">son 12 contenedores en 3 planos. arriba lo del usuario (frontend, BFF, auth), en el medio el procesamiento (edge, cola, workers, resultados) y abajo el almacenamiento y los logs. los puntitos que se mueven son mensajes reales del sistema.</div></div></div>
+
+<div class="s"><div class="n">09</div><div><div class="t">recorrido de un clip</div><div class="d">seguimos un clip de punta a punta: se graba, se limpia, se guarda en minio, a la cola va solo un aviso, un worker cuenta los autos, guarda el resultado y recién ahí confirma. el mapa se actualiza cada 5 segundos.</div></div></div>
+
+<div class="s"><div class="n">10</div><div><div class="t">12-factor</div><div class="d">nombramos los siete rápido: config por variables de entorno, servicios que se cambian tocando el host, procesos sin estado, escalar sumando réplicas, arrancar y caerse sin drama, el mismo docker en todas las máquinas y los logs como flujo.</div></div></div>
+
+<div class="s"><div class="n">11</div><div><div class="t">tecnologías <span>un bloque por click</span></div><div class="d">una por bloque, con su porqué: fastapi para servicios livianos, react para la consola, dos rabbitmq (clips y logs), dos postgres (usuarios y resultados), minio para guardar clips, numpy y scipy para simular la visión, docker compose para levantar todo y leaflet para el mapa.</div></div></div>
+
+<div class="s"><div class="n">12</div><div><div class="t">comunicación</div><div class="d">HTTP/REST cuando el usuario espera una respuesta. AMQP para los clips: desacopla cámaras de workers, aguanta picos y reentrega si algo falla. y otra cola aparte para logs, así loguear nunca frena al sistema.</div></div></div>
+
+<div class="s"><div class="n">13</div><div><div class="t">persistencia</div><div class="d">el clip pesa unos 150 KB y no viaja por la cola: va a minio, y por rabbit pasa un aviso de 300 bytes con la clave del archivo (claim check). además hay una base de resultados y otra de usuarios y sesiones.</div></div></div>
+
+<div class="s"><div class="n">14</div><div><div class="t">tolerancia a fallos</div><div class="d">la promesa es que ningún clip se pierde ni se cuenta dos veces: confirmamos después de guardar, el id del clip evita duplicados, lo que falla va a la DLQ sin trabar la cola, y los servicios se reinician y reconectan solos.</div></div></div>
+
+<div class="s"><div class="n">15</div><div><div class="t">escalabilidad</div><div class="d">con un worker y mucha carga la cola crece 2,5 mensajes por segundo. levantamos tres con un comando y en unos 55 segundos la cola queda en cero. el trabajo se reparte casi exacto: 173, 170 y 170.</div></div></div>
+
+<div class="s"><div class="n">16</div><div><div class="t">evidencia</div><div class="d">todo lo medimos con 5 scripts que cualquiera puede correr: escalado, worker caído (36 publicados, 36 guardados), idempotencia (3 envíos, 1 fila), DLQ y una carga de 300 cámaras.</div></div></div>
+
+<div class="s"><div class="n">17</div><div><div class="t">producto</div><div class="d">las cuatro funcionalidades: login con roles, mapa en vivo, historial por esquina y salud del sistema para el admin.</div></div></div>
+
+<div class="s"><div class="n">18</div><div><div class="t">detalle de una esquina</div><div class="d">al elegir una esquina se ven los autos por clip durante el día, los umbrales y el pico.</div></div></div>
+
+<div class="s"><div class="n">19</div><div><div class="t">vista de sistema</div><div class="d">el admin ve todos los contenedores, cómo se conectan y los mensajes pasando, junto con los logs.</div></div></div>
+
+<div class="s"><div class="n">20</div><div><div class="t">observabilidad</div><div class="d">el pilar que implementamos son los logs: todos los servicios usan el mismo formato JSON y el mismo trace_id, así se puede seguir un clip de punta a punta. van a stdout y a una cola aparte sin bloquear. métricas y dashboards quedan en curso.</div></div></div>
+
+<div class="s"><div class="n">21</div><div><div class="t">conclusión</div><div class="d">nos llevamos tres cosas: entregar al menos una vez más idempotencia da cero pérdidas y cero duplicados; conviene escalar solo donde está el costo; y el cuello de botella real va a ser la visión, no la mensajería. después, el trabajo futuro en una línea.</div></div></div>
+
+<div class="s"><div class="n">22</div><div><div class="t">preguntas</div><div class="d">agradecemos y abrimos a preguntas.</div></div></div>
+</body>
+</html>
