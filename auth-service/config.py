@@ -26,3 +26,8 @@ LOGS_QUEUE_NAME = os.getenv("LOGS_QUEUE_NAME", "logs_queue")
 
 # Peer Service URLs
 API_REST_URL = os.getenv("API_REST_URL", "http://api-rest:8000")
+
+# Contraseñas de los usuarios de desarrollo del seed (se guardan hasheadas, ver passwords.py).
+# Solo se usan al crear el usuario; cambiarlas después no modifica un usuario existente.
+AUTH_SEED_USER_PASSWORD = os.getenv("AUTH_SEED_USER_PASSWORD", "user123")
+AUTH_SEED_ADMIN_PASSWORD = os.getenv("AUTH_SEED_ADMIN_PASSWORD", "admin123")

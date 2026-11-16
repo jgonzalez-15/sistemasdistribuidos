@@ -5,9 +5,12 @@ from typing import Optional
 from datetime import datetime, timedelta
 import psycopg2
 from psycopg2.extras import RealDictCursor
+import time
 import uuid
 import secrets
 import config
+import passwords
+from logs import log_event
 import metrics  # noqa: F401  (registra auth_login_total y auth_active_sessions)
 import observability
 
@@ -77,21 +80,47 @@ def init_db():
                     is_active BOOLEAN NOT NULL DEFAULT TRUE
                 );
             """)
-            cur.execute("""
-                INSERT INTO users (username, password, role) VALUES
-                    ('user', 'user123', 'user'),
-                    ('admin', 'admin123', 'admin')
-                ON CONFLICT (username) DO UPDATE SET role = EXCLUDED.role;
-            """)
+            # Usuarios de desarrollo: se crean con la contraseña ya hasheada (S1). Las contraseñas
+            # vienen de la configuración (12-Factor III); si el usuario ya existe solo se ajusta el rol.
+            for username, password, role in (
+                ("user", config.AUTH_SEED_USER_PASSWORD, "user"),
+                ("admin", config.AUTH_SEED_ADMIN_PASSWORD, "admin"),
+            ):
+                cur.execute(
+                    """
+                    INSERT INTO users (username, password, role) VALUES (%s, %s, %s)
+                    ON CONFLICT (username) DO UPDATE SET role = EXCLUDED.role;
+                    """,
+                    (username, passwords.hash_password(password), role),
+                )
+            # Migración: toda contraseña que siga en texto plano (volúmenes creados antes de S1) se
+            # reemplaza por su hash. No hace falta borrar el volumen de auth-db.
+            cur.execute("SELECT username, password FROM users")
+            migradas = 0
+            for fila in cur.fetchall():
+                if not passwords.es_hash(fila["password"]):
+                    cur.execute("UPDATE users SET password = %s WHERE username = %s",
+                                (passwords.hash_password(fila["password"]), fila["username"]))
+                    migradas += 1
+            if migradas:
+                log_event("passwords_migrated", level="WARNING", migrated=migradas,
+                          message=f"{migradas} contraseña(s) en texto plano reemplazadas por su hash")
         conn.commit()
         conn.close()
+        return True
     except Exception as e:
         print(f"Database initialization warning: {e}")
+        return False
 
 
 @app.on_event("startup")
 def on_startup():
-    init_db()
+    # Si auth-db todavía no acepta conexiones, se reintenta: sin init_db no corre la migración de
+    # contraseñas y los usuarios viejos (texto plano) no podrían entrar.
+    for _ in range(10):
+        if init_db():
+            return
+        time.sleep(2)
 
 
 @app.post("/login")
@@ -103,13 +132,17 @@ def login(loginBody: LoginBody):
     try:
         conn = get_db_connection()
         with conn.cursor() as cur:
+            # Se busca solo por usuario y el hash se verifica en Python (S1). Si el usuario no existe
+            # se verifica igual contra un hash de relleno: misma demora y misma respuesta en ambos casos.
             cur.execute(
-                "SELECT username, password, role FROM users WHERE username = %s AND password = %s",
-                (login_user, loginBody.password)
+                "SELECT username, password, role FROM users WHERE username = %s",
+                (login_user,)
             )
             user_record = cur.fetchone()
+            guardado = user_record["password"] if user_record else passwords.HASH_RELLENO
+            valida = passwords.verify_password(loginBody.password, guardado)
 
-            if not user_record:
+            if not user_record or not valida:
                 conn.close()
                 raise HTTPException(status_code=401, detail="Invalid username or password")
 

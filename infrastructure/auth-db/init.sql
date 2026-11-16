@@ -15,8 +15,11 @@ CREATE TABLE IF NOT EXISTS sessions (
     is_active BOOLEAN NOT NULL DEFAULT TRUE
 );
 
--- Seed the single default user and single default admin accounts
+-- Usuarios de desarrollo (user/user123, admin/admin123). La contraseña se guarda como hash
+-- PBKDF2-HMAC-SHA256 (formato pbkdf2_sha256$iteraciones$sal$hash), nunca en texto plano.
+-- auth-service también los crea al arrancar y migra cualquier contraseña vieja en texto plano.
+-- Ver docs/decisiones-seguridad.md (S1).
 INSERT INTO users (username, password, role) VALUES
-    ('user', 'user123', 'user'),
-    ('admin', 'admin123', 'admin')
+    ('user', 'pbkdf2_sha256$600000$YVMXfLDZv4/Y2OK0hCBZVA==$HhVfws23Z2NSNHd/AdJHxRQLARRon7Q8cYQ/tfO+W4c=', 'user'),
+    ('admin', 'pbkdf2_sha256$600000$1VdThcTU8y1tTNm8FCBooA==$lqqjSq4tncixLnd1GDSKhncsc2FiEr6bucMVSV6lQ+U=', 'admin')
 ON CONFLICT (username) DO NOTHING;

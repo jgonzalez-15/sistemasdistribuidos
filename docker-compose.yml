@@ -305,6 +305,10 @@ services:
     environment:
       SERVICE_NAME: auth-service
       SERVICE_PORT: 8005
+      # Contraseñas de los usuarios de desarrollo del seed; se guardan hasheadas (docs/decisiones-seguridad.md, S1)
+      AUTH_SEED_USER_PASSWORD: ${AUTH_SEED_USER_PASSWORD:-user123}
+      AUTH_SEED_ADMIN_PASSWORD: ${AUTH_SEED_ADMIN_PASSWORD:-admin123}
+      PBKDF2_ITERATIONS: ${PBKDF2_ITERATIONS:-600000}
       METRICS_ENABLED: ${METRICS_ENABLED:-true}   # GET /metrics para Prometheus
       AUTH_DB_HOST: ${AUTH_DB_HOST:-auth-db}
       AUTH_DB_PORT: 5432
