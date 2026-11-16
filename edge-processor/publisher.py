@@ -9,6 +9,7 @@ import pika
 import pika.exceptions
 
 import config
+import metrics
 from logs import log_event
 
 MAX_CONNECT_WAIT = 30   # tope de la espera entre intentos de conexión (segundos)
@@ -83,6 +84,7 @@ class Publisher:
                 )
                 return True
             except (pika.exceptions.AMQPError, OSError) as e:
+                metrics.PUBLISH_RETRIES.inc()
                 log_event("publish_retry", level="WARNING", trace_id=message["clip_id"],
                           clip_id=message["clip_id"],
                           message=f"Falló la publicación (intento {intento}): {e!r}",

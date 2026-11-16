@@ -4,6 +4,7 @@ import time
 import uuid
 
 import config
+import metrics
 from logs import log_event, now_iso
 from preprocess import preprocess
 from publisher import Publisher
@@ -18,7 +19,9 @@ def process_clip(camera_id, intersection_id, simulator, storage, publisher):
     timestamp = now_iso()                       # momento de captura del clip
 
     frames = simulator.generate_clip()
+    n_original = int(frames.shape[0])
     frames = preprocess(frames)
+    metrics.FRAMES_DISCARDED.inc(n_original - int(frames.shape[0]))
     key = f"{camera_id}/{clip_id}.npy"
 
     # 1) Claim check: el clip va a MinIO y por la cola viaja solo la referencia
@@ -26,6 +29,7 @@ def process_clip(camera_id, intersection_id, simulator, storage, publisher):
         storage.upload_clip(key, frames)
     except Exception as e:
         # Sin buffer local (simplificación aprobada): el clip se pierde
+        metrics.PUBLISH_FAILURES.labels("upload").inc()
         log_event("clip_failed", level="ERROR", trace_id=clip_id, clip_id=clip_id,
                   message=f"No se pudo subir el clip a MinIO: {e!r}",
                   stage="upload", camera_id=camera_id, intersection_id=intersection_id)
@@ -43,11 +47,16 @@ def process_clip(camera_id, intersection_id, simulator, storage, publisher):
         "shape": [int(frames.shape[1]), int(frames.shape[2])],
     }
     if publisher.publish(message):
+        metrics.CLIPS_PUBLISHED.labels(camera_id, intersection_id).inc()
+        metrics.LAST_CLIP_TS.labels(camera_id).set_to_current_time()
+        metrics.CLIP_SIZE.observe(frames.nbytes)
+        metrics.CLIP_DURATION.observe(time.monotonic() - t0)
         log_event("clip_published", trace_id=clip_id, clip_id=clip_id,
                   duration_ms=(time.monotonic() - t0) * 1000,
                   message=f"Clip de {camera_id} publicado",
                   camera_id=camera_id, intersection_id=intersection_id, frames=message["frames"])
     else:
+        metrics.PUBLISH_FAILURES.labels("publish").inc()
         log_event("clip_failed", level="ERROR", trace_id=clip_id, clip_id=clip_id,
                   message="Se agotaron los reintentos de publicación",
                   stage="publish", camera_id=camera_id, intersection_id=intersection_id)
@@ -74,11 +83,14 @@ def edge_loop(cameras, stop_event):
                     process_clip(camera_id, intersection_id, simuladores[camera_id], storage, publisher)
                 except Exception as e:
                     # Un error en una cámara no debe matar el hilo
+                    metrics.PUBLISH_FAILURES.labels("process").inc()
                     log_event("clip_failed", level="ERROR",
                               message=f"Error inesperado procesando {camera_id}: {e!r}",
                               stage="process", camera_id=camera_id, intersection_id=intersection_id)
 
             transcurrido = time.monotonic() - t0
+            metrics.ROUND_DURATION.observe(transcurrido)
+            metrics.set_lagging(nombre, transcurrido > config.FRAME_INTERVAL)
             if transcurrido > config.FRAME_INTERVAL:
                 log_event("edge_lagging", level="WARNING",
                           message=f"{nombre} tardó {transcurrido:.2f} s en una ronda "

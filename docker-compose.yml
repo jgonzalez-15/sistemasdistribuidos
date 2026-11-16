@@ -1,3 +1,7 @@
+# Stack de observabilidad (perfil `observability`, opt-in): ver docker-compose.observability.yml
+include:
+  - docker-compose.observability.yml
+
 services:
   camera-queue:
     image: rabbitmq:3.13-management-alpine
@@ -60,7 +64,9 @@ services:
       - distributed_net
 
   clips-db:
-    image: elestio/minio:latest
+    # Fijada por digest: es la imagen `latest` que corría el 2026-11-15 (MinIO RELEASE.2025-09-07T16-13-09Z).
+    # elestio/minio solo publica el tag `latest`, por eso no hay un tag de versión.
+    image: elestio/minio@sha256:25348a257f1ece1b192f25f6cd9854618fa86422ac87b494b5d4e629c556d4bd
     container_name: clips-db
     entrypoint: /bin/sh
     command: -c "mkdir -p /data/$${CLIPS_BUCKET_NAME:-clips} && minio server /data --console-address ':9001'"
@@ -71,6 +77,8 @@ services:
       MINIO_ROOT_USER: ${CLIPS_DB_ACCESS_KEY:-minioadmin}
       MINIO_ROOT_PASSWORD: ${CLIPS_DB_SECRET_KEY:-minioadmin}
       CLIPS_BUCKET_NAME: ${CLIPS_BUCKET_NAME:-clips}
+      # Métricas Prometheus sin token (/minio/v2/metrics/*): el puerto 9000 es de desarrollo.
+      MINIO_PROMETHEUS_AUTH_TYPE: ${MINIO_PROMETHEUS_AUTH_TYPE:-public}
     volumes:
       - clips_db_data:/data
     networks:
@@ -84,6 +92,7 @@ services:
     environment:
       SERVICE_NAME: api-rest
       SERVICE_PORT: 8000
+      METRICS_ENABLED: ${METRICS_ENABLED:-true}   # GET /metrics para Prometheus
       CAMERA_QUEUE_HOST: ${CAMERA_QUEUE_HOST:-camera-queue}
       CAMERA_QUEUE_PORT: 5672
       CAMERA_QUEUE_USER: ${CAMERA_QUEUE_USER:-guest}
@@ -125,6 +134,7 @@ services:
     environment:
       SERVICE_NAME: edge-processor
       SERVICE_PORT: 8001
+      METRICS_ENABLED: ${METRICS_ENABLED:-true}   # GET /metrics para Prometheus
       # Cámaras que simula esta instancia (una instancia por zona). CAMERA_RANGE, si se define, reemplaza a CAMERA_IDS.
       CAMERA_IDS: ${CAMERA_IDS:-cam-1:int-1,cam-2:int-1,cam-3:int-2,cam-4:int-2,cam-5:int-3,cam-6:int-3}
       CAMERA_RANGE: ${CAMERA_RANGE:-}
@@ -161,6 +171,7 @@ services:
     environment:
       SERVICE_NAME: cv-module
       SERVICE_PORT: 8002
+      METRICS_ENABLED: ${METRICS_ENABLED:-true}   # GET /metrics para Prometheus
       # Demora artificial por clip (ms), solo para que en la demo de escalado se vea bajar la cola.
       PROCESSING_DELAY_MS: ${PROCESSING_DELAY_MS:-0}
       CAMERA_QUEUE_HOST: ${CAMERA_QUEUE_HOST:-camera-queue}
@@ -201,6 +212,7 @@ services:
     environment:
       SERVICE_NAME: visualization-backend
       SERVICE_PORT: 8003
+      METRICS_ENABLED: ${METRICS_ENABLED:-true}   # GET /metrics para Prometheus
       LOGS_QUEUE_HOST: ${LOGS_QUEUE_HOST:-logs-queue}
       LOGS_QUEUE_PORT: 5672
       LOGS_QUEUE_USER: ${LOGS_QUEUE_USER:-guest}
@@ -232,6 +244,7 @@ services:
     environment:
       SERVICE_NAME: monitoring-pipeline
       SERVICE_PORT: 8004
+      METRICS_ENABLED: ${METRICS_ENABLED:-true}   # GET /metrics para Prometheus
       LOGS_QUEUE_HOST: ${LOGS_QUEUE_HOST:-logs-queue}
       LOGS_QUEUE_PORT: 5672
       LOGS_QUEUE_USER: ${LOGS_QUEUE_USER:-guest}
@@ -261,6 +274,7 @@ services:
     environment:
       SERVICE_NAME: auth-service
       SERVICE_PORT: 8005
+      METRICS_ENABLED: ${METRICS_ENABLED:-true}   # GET /metrics para Prometheus
       AUTH_DB_HOST: ${AUTH_DB_HOST:-auth-db}
       AUTH_DB_PORT: 5432
       AUTH_DB_NAME: ${AUTH_DB_NAME:-auth_db}

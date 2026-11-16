@@ -5,11 +5,14 @@ from typing import List, Optional, Any
 import json
 import config
 import db
+import metrics
+import observability
 
 THRESHOLD_CONGESTION = 75
 THRESHOLD_MODERATE = 40
 
 app = FastAPI(title="Visualization Backend")
+observability.setup(app)                         # GET /metrics + RED de HTTP
 
 app.add_middleware(
     CORSMiddleware,
@@ -397,3 +400,7 @@ def create_intersection(body: IntersectionCreateBody):
         return intersection
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Results DB error: {e}")
+
+
+# Métricas de negocio para Prometheus (reusa los umbrales de compute_congestion_level).
+metrics.registrar_negocio(compute_congestion_level)
