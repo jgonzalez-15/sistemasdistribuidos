@@ -4,6 +4,26 @@ Every component in this repository is isolated in its own container and configur
 
 ---
 
+## Acceso y credenciales de desarrollo
+
+Con `docker compose up -d --build` (y `--profile observability` para Grafana) quedan disponibles:
+
+| Dónde | URL | Usuario / contraseña | Para qué |
+| :--- | :--- | :--- | :--- |
+| Frontend: operador | http://localhost:3000 | `user` / `user123` | Dashboard de congestión por intersección |
+| Frontend: administrador | http://localhost:3000 | `admin` / `admin123` | Lo mismo, más la vista Sistema (estado de los servicios) |
+| RabbitMQ `camera-queue` | http://localhost:15672 | `guest` / `guest` | Cola de clips, `camera_dlq`, consumidores al escalar |
+| RabbitMQ `logs-queue` | http://localhost:15673 | `guest` / `guest` | Cola de logs (`logs_queue`) |
+| MinIO (clips) | http://localhost:9001 | `minioadmin` / `minioadmin` | Bucket `clips` con los `.npy` |
+| Grafana (perfil `observability`) | http://localhost:3001 | `admin` / `admin1` | Dashboards y alertas |
+| PostgreSQL `auth-db` / `results-db` / `metrics-db` | `localhost:5433` / `5434` / `5435` | `postgres` / `postgres` | Consultas directas (`auth_db`, `results_db`, `metrics_db`) |
+
+Son credenciales **de desarrollo**, publicadas a propósito para poder probar y corregir el sistema. Todas se cambian por variable de entorno (`.env`, 12-Factor III). Las contraseñas del login se guardan en `auth-db` como hash PBKDF2, no en texto plano (sección 7).
+
+Los botones de carga rápida del login que usan otros usuarios (`operador.montevideo`, `admin.central`) solo funcionan en el modo sin backend. Con el sistema levantado se usan `user` y `admin`.
+
+---
+
 ## 1. Application Components & Configured Ports
 
 | Component | Directory | Language / Stack | Port | Main Entrypoint & Config |
@@ -32,7 +52,7 @@ Every component in this repository is isolated in its own container and configur
 - **Auth Database (`auth-db` - PostgreSQL 16)**:
   - **Ports**: Host `5433` $\rightarrow$ Container `5432`
   - **Database / Credentials**: `auth_db` (`postgres` / `postgres`)
-  - **Init Script**: `infrastructure/auth-db/init.sql` (`users` table with `username` and `password`)
+  - **Init Script**: `infrastructure/auth-db/init.sql`: tablas `users` (`username`, `password` como hash PBKDF2, `role`) y `sessions`. Usuarios de desarrollo: `user`/`user123` y `admin`/`admin123` (ver sección 7).
 - **Results Database (`results-db` - PostgreSQL 16)**:
   - **Ports**: Host `5434` $\rightarrow$ Container `5432`
   - **Database / Credentials**: `results_db` (`postgres` / `postgres`)
@@ -213,3 +233,18 @@ Variables nuevas (todas con default de desarrollo, ver `.env.example`): `GRAFANA
 > cAdvisor es opcional porque depende de cómo cada SO expone los sockets de Docker: probado en Docker Desktop para macOS; en Windows puede no funcionar.
 
 **`logs_queue` acotada** (policy `logs-queue-limites`: 50 000 mensajes, descarta los más viejos, TTL 24 h). Si el broker ya estaba levantado antes de este cambio: `docker compose restart logs-queue` (recarga `definitions.json` sin borrar la cola).
+
+---
+
+## 7. Seguridad: contraseñas
+
+`auth-service` guarda las contraseñas como hash PBKDF2-HMAC-SHA256 con sal por usuario: `pbkdf2_sha256$iteraciones$sal$hash`, en `auth-service/passwords.py`. Nunca las guarda en texto plano.
+- El login busca por usuario y compara el hash. Un usuario inexistente recibe la misma respuesta (401) y tarda lo mismo.
+- Usuarios de desarrollo: `user`/`user123` y `admin`/`admin123`, configurables con `AUTH_SEED_USER_PASSWORD` y `AUTH_SEED_ADMIN_PASSWORD`.
+- **Bases existentes:** al arrancar, `auth-service` convierte a hash toda contraseña vieja en texto plano (evento `passwords_migrated`). No hace falta borrar el volumen.
+- **Si se vuelve a una versión anterior** de `auth-service` con la base ya convertida, nadie puede entrar. Se recupera con:
+  ```bash
+  docker compose exec -T auth-db psql -U postgres -d auth_db -c "UPDATE users SET password='user123' WHERE username='user'; UPDATE users SET password='admin123' WHERE username='admin';"
+  ```
+
+Decisión y riesgos conocidos que quedan (puertos internos publicados, CORS, credenciales por defecto): `docs/decisiones-seguridad.md`.
