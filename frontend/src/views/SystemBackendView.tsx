@@ -18,6 +18,7 @@ import {
   VISUALIZATION_BACKEND_URL,
 } from '../config';
 import { fetchSystemHealthFromBff } from '../services/bffApi';
+import ClipsPerMinutePill from '../components/ClipsPerMinutePill';
 
 interface SystemBackendViewProps {
   isFaultTolerantDemoMode: boolean;
@@ -870,6 +871,7 @@ export const SystemBackendView: React.FC<SystemBackendViewProps> = ({
         </div>
 
         <div className="sys-subheader-right">
+          <ClipsPerMinutePill />
           <button
             type="button"
             className={`sim-btn ${isSlowMo ? 'active slowmo-active' : ''}`}
