@@ -11,7 +11,7 @@ set +e    # el verificador sigue aunque falle un chequeo: los cuenta y reporta t
 
 PROM="http://localhost:${PROMETHEUS_PORT:-9090}"
 GRAFANA="http://localhost:${GRAFANA_PORT:-3001}"
-GAUTH="${GRAFANA_ADMIN_USER:-admin}:${GRAFANA_ADMIN_PASSWORD:-admin}"
+GAUTH="${GRAFANA_ADMIN_USER:-admin}:${GRAFANA_ADMIN_PASSWORD:-admin1}"
 LOKI="http://localhost:${LOKI_PORT:-3100}"
 REPLICAS="${REPLICAS:-3}"
 OK=0; FALLAS=0

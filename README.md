@@ -198,7 +198,7 @@ docker compose --profile observability down                               # sin 
 | Herramienta | URL | Notas |
 | :--- | :--- | :--- |
 | Prometheus | http://localhost:9090 (`PROMETHEUS_PORT`) | *Status → Targets*: todos los servicios, cada réplica de `cv-module`, exporters y probes. Retención 3 días. |
-| Grafana | http://localhost:3001 (`GRAFANA_PORT`) | Usuario `admin` / `admin` (dev, `GRAFANA_ADMIN_*`). Carpeta **SGTU**: dashboards *Salud técnica*, *Pipeline de procesamiento* y *Tránsito*; *Alerting → Alert rules*: 18+ reglas. Todo provisionado desde `observability/grafana/` (sin clicks). |
+| Grafana | http://localhost:3001 (`GRAFANA_PORT`) | Usuario `admin` / `admin1` (dev, `GRAFANA_ADMIN_*`; no pide cambiarla). Si tu Grafana se creó antes con otra contraseña, sigue valiendo esa (queda en el volumen `grafana_data`): `docker compose exec grafana grafana cli admin reset-admin-password admin1`. Carpeta **SGTU**: dashboards *Salud técnica*, *Pipeline de procesamiento* y *Tránsito*; *Alerting → Alert rules*: 18+ reglas. Todo provisionado desde `observability/grafana/` (sin clicks). |
 | Loki | http://localhost:3100 (`LOKI_PORT`) | Logs de todos los servicios (vía monitoring-pipeline). Consultar desde Grafana → *Explore* o el dashboard *SGTU · Logs*, p. ej. `{service="cv-module", event="clip_failed"} \| json`. Retención 48 h. |
 | Metrics DB | `localhost:5435` (`postgres`/`postgres`) | Agregados por minuto: `docker compose exec metrics-db psql -U postgres -d metrics_db -c 'SELECT * FROM metrics_minute ORDER BY minute DESC LIMIT 5'`. Es parte del sistema base. |
 | Alertas recibidas | `docker logs -f alert-receiver` | Contact point webhook: imprime cada alerta *firing* / *resolved*. |
