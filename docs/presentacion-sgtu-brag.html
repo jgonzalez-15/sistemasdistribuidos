@@ -1,0 +1,1045 @@
+<!DOCTYPE html>
+<html lang="es" data-theme="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>SGTU Montevideo — Presentación & Engineering Brag Sheet</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --canvas: #09090b;
+      --canvas-raised: #0f0f13;
+      --surface-elevated: #16161c;
+      --surface-glass: rgba(18, 18, 24, 0.86);
+      --border: rgba(255, 255, 255, 0.09);
+      --border-strong: rgba(255, 255, 255, 0.16);
+      --text-primary: #fafafa;
+      --text-secondary: #a1a1aa;
+      --text-tertiary: #71717a;
+      --accent: #3b82f6;
+      --accent-soft: rgba(59, 130, 246, 0.14);
+      --fluid: #10b981;
+      --fluid-soft: rgba(16, 185, 129, 0.14);
+      --moderate: #f59e0b;
+      --moderate-soft: rgba(245, 158, 11, 0.14);
+      --critical: #ef4444;
+      --critical-soft: rgba(239, 68, 68, 0.14);
+      --purple: #a855f7;
+      --purple-soft: rgba(168, 85, 247, 0.14);
+      --cyan: #38bdf8;
+      --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+      --font-mono: 'JetBrains Mono', monospace;
+    }
+
+    :root[data-theme="light"] {
+      --canvas: #f8fafc;
+      --canvas-raised: #ffffff;
+      --surface-elevated: #f1f5f9;
+      --surface-glass: rgba(255, 255, 255, 0.9);
+      --border: rgba(15, 23, 42, 0.1);
+      --border-strong: rgba(15, 23, 42, 0.18);
+      --text-primary: #0f172a;
+      --text-secondary: #475569;
+      --text-tertiary: #64748b;
+      --accent: #2563eb;
+      --accent-soft: rgba(37, 99, 235, 0.1);
+      --fluid: #059669;
+      --fluid-soft: rgba(5, 150, 105, 0.1);
+      --moderate: #d97706;
+      --moderate-soft: rgba(217, 119, 6, 0.1);
+      --critical: #dc2626;
+      --critical-soft: rgba(220, 38, 38, 0.1);
+      --purple: #9333ea;
+      --purple-soft: rgba(147, 51, 234, 0.1);
+      --cyan: #0284c7;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    html, body {
+      width: 100%;
+      height: 100%;
+      background: var(--canvas);
+      color: var(--text-primary);
+      font-family: var(--font-sans);
+      overflow: hidden;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    /* Subtle grid background */
+    body::before {
+      content: '';
+      position: fixed;
+      inset: 0;
+      background-image:
+        linear-gradient(to right, var(--border) 1px, transparent 1px),
+        linear-gradient(to bottom, var(--border) 1px, transparent 1px);
+      background-size: 40px 40px;
+      opacity: 0.35;
+      pointer-events: none;
+      z-index: 0;
+    }
+
+    .deck-shell {
+      position: relative;
+      z-index: 1;
+      display: grid;
+      grid-template-rows: 52px 1fr 48px;
+      width: 100vw;
+      height: 100vh;
+    }
+
+    /* Top Command Header */
+    .deck-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 28px;
+      background: var(--surface-glass);
+      backdrop-filter: blur(16px);
+      border-bottom: 1px solid var(--border);
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-family: var(--font-mono);
+      font-size: 12.5px;
+      font-weight: 600;
+      letter-spacing: 0.04em;
+    }
+
+    .brand-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--fluid);
+      box-shadow: 0 0 10px var(--fluid);
+    }
+
+    .brand-tag {
+      padding: 2px 8px;
+      border-radius: 4px;
+      background: var(--accent-soft);
+      border: 1px solid var(--accent);
+      color: var(--accent);
+      font-size: 10.5px;
+    }
+
+    .header-controls {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .ctrl-btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      height: 30px;
+      padding: 0 12px;
+      border-radius: 6px;
+      background: var(--surface-elevated);
+      border: 1px solid var(--border-strong);
+      color: var(--text-primary);
+      font-family: var(--font-mono);
+      font-size: 11px;
+      font-weight: 500;
+      cursor: pointer;
+      transition: all 0.15s ease;
+    }
+
+    .ctrl-btn:hover {
+      border-color: var(--accent);
+      color: var(--accent);
+    }
+
+    /* Slide Viewport */
+    .slides-stage {
+      position: relative;
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+    }
+
+    .slide {
+      position: absolute;
+      inset: 0;
+      padding: 36px 56px;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      max-width: 1440px;
+      margin: 0 auto;
+      opacity: 0;
+      transform: translateX(36px);
+      pointer-events: none;
+      transition: opacity 0.32s cubic-bezier(0.22, 1, 0.36, 1), transform 0.32s cubic-bezier(0.22, 1, 0.36, 1);
+      overflow-y: auto;
+    }
+
+    .slide.active {
+      opacity: 1;
+      transform: translateX(0);
+      pointer-events: auto;
+    }
+
+    .slide-kicker {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      font-family: var(--font-mono);
+      font-size: 11.5px;
+      font-weight: 600;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--accent);
+      margin-bottom: 10px;
+    }
+
+    .slide-title {
+      font-size: clamp(26px, 3.1vw, 40px);
+      font-weight: 700;
+      letter-spacing: -0.025em;
+      line-height: 1.15;
+      margin-bottom: 10px;
+    }
+
+    .slide-subtitle {
+      font-size: clamp(14px, 1.35vw, 17px);
+      color: var(--text-secondary);
+      max-width: 960px;
+      line-height: 1.5;
+      margin-bottom: 24px;
+    }
+
+    /* Grids & Cards */
+    .grid-2 {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 18px;
+    }
+
+    .grid-3 {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 16px;
+    }
+
+    .grid-4 {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 14px;
+    }
+
+    .card {
+      background: var(--canvas-raised);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 18px 20px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    .card.brag-highlight {
+      border-color: var(--accent);
+      box-shadow: inset 0 0 0 1px var(--accent-soft);
+    }
+
+    .card.fluid-highlight {
+      border-color: var(--fluid);
+      box-shadow: inset 0 0 0 1px var(--fluid-soft);
+    }
+
+    .card.warn-highlight {
+      border-color: var(--moderate);
+      box-shadow: inset 0 0 0 1px var(--moderate-soft);
+    }
+
+    .card-badge {
+      display: inline-flex;
+      align-self: flex-start;
+      padding: 2px 8px;
+      border-radius: 4px;
+      font-family: var(--font-mono);
+      font-size: 10px;
+      font-weight: 600;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      background: var(--surface-elevated);
+      color: var(--text-secondary);
+      border: 1px solid var(--border-strong);
+    }
+
+    .card-badge.blue { background: var(--accent-soft); color: var(--accent); border-color: var(--accent); }
+    .card-badge.green { background: var(--fluid-soft); color: var(--fluid); border-color: var(--fluid); }
+    .card-badge.amber { background: var(--moderate-soft); color: var(--moderate); border-color: var(--moderate); }
+    .card-badge.purple { background: var(--purple-soft); color: var(--purple); border-color: var(--purple); }
+    .card-badge.red { background: var(--critical-soft); color: var(--critical); border-color: var(--critical); }
+
+    .card h3 {
+      font-size: 16px;
+      font-weight: 600;
+      letter-spacing: -0.01em;
+    }
+
+    .card p, .card li {
+      font-size: 13.5px;
+      color: var(--text-secondary);
+      line-height: 1.5;
+    }
+
+    .card ul {
+      padding-left: 18px;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+
+    .card strong {
+      color: var(--text-primary);
+      font-weight: 600;
+    }
+
+    code {
+      font-family: var(--font-mono);
+      font-size: 12px;
+      padding: 2px 5px;
+      border-radius: 4px;
+      background: var(--surface-elevated);
+      border: 1px solid var(--border);
+      color: var(--cyan);
+    }
+
+    /* Hero KPI Strip */
+    .kpi-strip {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 14px;
+      margin: 18px 0;
+    }
+
+    .kpi-box {
+      background: var(--canvas-raised);
+      border: 1px solid var(--border-strong);
+      border-radius: 10px;
+      padding: 16px 18px;
+    }
+
+    .kpi-num {
+      font-family: var(--font-mono);
+      font-size: 30px;
+      font-weight: 700;
+      letter-spacing: -0.03em;
+      line-height: 1.1;
+    }
+
+    .kpi-label {
+      margin-top: 6px;
+      font-family: var(--font-mono);
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: var(--text-tertiary);
+    }
+
+    .kpi-desc {
+      margin-top: 4px;
+      font-size: 12.5px;
+      color: var(--text-secondary);
+    }
+
+    /* Tables */
+    .brag-table {
+      width: 100%;
+      border-collapse: collapse;
+      background: var(--canvas-raised);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      overflow: hidden;
+      font-size: 13px;
+    }
+
+    .brag-table th,
+    .brag-table td {
+      padding: 11px 14px;
+      text-align: left;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .brag-table th {
+      background: var(--surface-elevated);
+      font-family: var(--font-mono);
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: var(--text-secondary);
+    }
+
+    .brag-table tr:last-child td {
+      border-bottom: none;
+    }
+
+    /* Code block */
+    .code-snippet {
+      background: #070709;
+      color: #e4e4e7;
+      border: 1px solid var(--border-strong);
+      border-radius: 8px;
+      padding: 12px 14px;
+      font-family: var(--font-mono);
+      font-size: 11.5px;
+      line-height: 1.55;
+      overflow-x: auto;
+    }
+
+    :root[data-theme="light"] .code-snippet {
+      background: #0f172a;
+      color: #f8fafc;
+    }
+
+    /* Footer Navigation */
+    .deck-footer {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 28px;
+      background: var(--surface-glass);
+      border-top: 1px solid var(--border);
+      font-family: var(--font-mono);
+      font-size: 11.5px;
+      color: var(--text-secondary);
+    }
+
+    .progress-dots {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .dot-btn {
+      width: 22px;
+      height: 6px;
+      border-radius: 999px;
+      background: var(--border-strong);
+      border: none;
+      cursor: pointer;
+      transition: all 0.2s ease;
+    }
+
+    .dot-btn.active {
+      width: 38px;
+      background: var(--accent);
+    }
+
+    .team-pills {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin-top: 12px;
+    }
+
+    .team-pill {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 12px;
+      background: var(--surface-elevated);
+      border: 1px solid var(--border-strong);
+      border-radius: 8px;
+      font-size: 12.5px;
+    }
+
+    .team-pill span {
+      font-family: var(--font-mono);
+      font-size: 10.5px;
+      color: var(--accent);
+    }
+
+    /* Diagram SVG inside Slide 3 */
+    .arch-svg-wrap {
+      background: var(--canvas-raised);
+      border: 1px solid var(--border-strong);
+      border-radius: 10px;
+      padding: 12px;
+    }
+
+    .arch-svg {
+      width: 100%;
+      height: auto;
+      max-height: 410px;
+      display: block;
+    }
+  </style>
+</head>
+<body>
+  <div class="deck-shell">
+    <!-- Top Header -->
+    <header class="deck-header">
+      <div class="brand">
+        <span class="brand-dot"></span>
+        <span>SGTU // MONTEVIDEO</span>
+        <span class="brand-tag">ENGINEERING BRAG SHEET · DEFENSA</span>
+      </div>
+      <div class="header-controls">
+        <button class="ctrl-btn" id="btn-theme" type="button" title="Alternar Modo Claro / Oscuro (Tecla T)">
+          ☀ / ☾ Tema
+        </button>
+        <button class="ctrl-btn" id="btn-prev" type="button">← Anterior</button>
+        <span id="slide-counter" style="font-family: var(--font-mono); font-size: 12px; min-width: 54px; text-align: center;">01 / 10</span>
+        <button class="ctrl-btn" id="btn-next" type="button">Siguiente →</button>
+      </div>
+    </header>
+
+    <!-- Slides Stage -->
+    <main class="slides-stage">
+
+      <!-- SLIDE 1: HERO & BRAG SHEET SUMMARY -->
+      <section class="slide active" data-slide="0">
+        <div class="slide-kicker">SISTEMAS DISTRIBUIDOS · PROYECTO INTEGRAL 2026</div>
+        <h1 class="slide-title">Sistema de Gestión y Telemetría de Tránsito Urbano (SGTU Montevideo)</h1>
+        <p class="slide-subtitle">
+          Arquitectura de microservicios distribuida, orientada a eventos y tolerante a fallos para el procesamiento concurrente de cámaras viales, agregación analítica en tiempo real y supervisión operativa web.
+        </p>
+
+        <div class="kpi-strip">
+          <div class="kpi-box">
+            <div class="kpi-num" style="color: var(--accent);">12 Nodos</div>
+            <div class="kpi-label">Ecosistema Docker</div>
+            <div class="kpi-desc">2 brokers RabbitMQ, 2 PostgreSQL, MinIO S3, 6 microservicios Python y SPA React.</div>
+          </div>
+          <div class="kpi-box">
+            <div class="kpi-num" style="color: var(--fluid);">60 clips/s</div>
+            <div class="kpi-label">Throughput Verificado</div>
+            <div class="kpi-desc">300 cámaras concurrentes procesadas sin acumulación de cola (~6 ms/clip).</div>
+          </div>
+          <div class="kpi-box">
+            <div class="kpi-num" style="color: var(--moderate);">630× Menos</div>
+            <div class="kpi-label">Tráfico en Broker (D1)</div>
+            <div class="kpi-desc">Patrón <em>Claim Check</em>: ~190 KB en MinIO S3 vs. solo ~300 B de metadata en RabbitMQ.</div>
+          </div>
+          <div class="kpi-box">
+            <div class="kpi-num" style="color: var(--purple);">0 Duplicados</div>
+            <div class="kpi-label">Idempotencia Estricta</div>
+            <div class="kpi-desc">ACK post-commit + <code>clip_id UNIQUE</code> con <code>ON CONFLICT DO NOTHING</code>.</div>
+          </div>
+        </div>
+
+        <div class="card">
+          <span class="card-badge blue">EQUIPO & RESPONSABILIDADES</span>
+          <div class="team-pills">
+            <div class="team-pill"><strong>Hernán Astorino</strong> <span>Frontend React · Diagrama en Vivo · Visualization · Defensa</span></div>
+            <div class="team-pill"><strong>Joaquín Rodríguez</strong> <span>RabbitMQ · Edge Processor · CV Workers · Claim Check & DLQ</span></div>
+            <div class="team-pill"><strong>Joaquín Gonzalez</strong> <span>API REST (BFF) · Auth Service · Esquemas SQL & Sesiones</span></div>
+            <div class="team-pill"><strong>Rosario Stoppiello</strong> <span>Observabilidad · Logs Queue · Métricas & Alertas</span></div>
+            <div class="team-pill"><strong>Iago Machado</strong> <span>Informe Técnico · Arquitectura SD · Trade-offs D1–D17</span></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- SLIDE 2: ARQUITECTURA & DECISIONES DE DISEÑO -->
+      <section class="slide" data-slide="1">
+        <div class="slide-kicker">01 · ARQUITECTURA DE ALTO NIVEL</div>
+        <h2 class="slide-title">Tres Planos Desacoplados sobre <code>distributed_net</code></h2>
+        <p class="slide-subtitle">
+          Separación estricta entre el plano de acceso interactivo (BFF + Auth), el pipeline asíncrono de visión artificial (Edge → RabbitMQ/MinIO → Workers → DB) y el plano de observabilidad asíncrona.
+        </p>
+
+        <div class="grid-3">
+          <div class="card brag-highlight">
+            <span class="card-badge purple">PLANO 01 · SEGURIDAD & GATEWAY BFF</span>
+            <h3>Transparencia de Acceso</h3>
+            <ul>
+              <li><strong>React SPA (<code>:3000</code>):</strong> Nunca contacta microservicios internos ni bases de datos directamente.</li>
+              <li><strong>API REST BFF (<code>:8000</code>):</strong> Único punto de entrada. Valida tokens contra <code>auth-service:8005</code> y delega consultas a <code>visualization-backend:8003</code>.</li>
+              <li><strong>Auth DB (<code>:5433</code>):</strong> Persiste usuarios (<code>Operador</code> / <code>Administrador</code>), sesiones activas y expiración de tokens.</li>
+            </ul>
+          </div>
+
+          <div class="card fluid-highlight">
+            <span class="card-badge green">PLANO 02 · PIPELINE DE VISIÓN ARTIFICIAL</span>
+            <h3>Ingesta + Cómputo Elástico</h3>
+            <ul>
+              <li><strong>Edge Processor (<code>:8001</code>):</strong> Simula cámaras por zonas (<code>cam-1..6</code> en <code>int-1..3</code>), descarta frames estáticos, sube <code>.npy</code> a MinIO y publica metadata en RabbitMQ.</li>
+              <li><strong>Camera Queue (<code>:5672</code>):</strong> Cola durable <code>camera_processing_queue</code> + desvío atómico a <code>camera_dlq</code>.</li>
+              <li><strong>CV Module (<code>--scale=3</code>):</strong> Pool de workers stateless que calculan la mediana vehicular por clip y escriben en <code>results-db:5434</code>.</li>
+            </ul>
+          </div>
+
+          <div class="card warn-highlight">
+            <span class="card-badge amber">PLANO 03 · STORAGE S3 & OBSERVABILIDAD</span>
+            <h3>Claim Check & Trazabilidad</h3>
+            <ul>
+              <li><strong>MinIO Object Store (<code>:9000</code>):</strong> Bucket <code>clips</code> almacena los tensores <code>cam-N/&lt;clip_id&gt;.npy</code> fuera del broker AMQP.</li>
+              <li><strong>Logs Queue (<code>:5673</code>):</strong> Segundo broker RabbitMQ dedicado a telemetría para no competir con el procesamiento de video.</li>
+              <li><strong>Correlación Extremo a Extremo:</strong> Todos los eventos JSON llevan <code>trace_id = clip_id</code> o <code>session_id</code>.</li>
+            </ul>
+          </div>
+        </div>
+      </section>
+
+      <!-- SLIDE 3: DIAGRAMA PLANAR DE DESPLIEGUE -->
+      <section class="slide" data-slide="2">
+        <div class="slide-kicker">02 · TOPOLOGÍA PLANAR DE 12 CONTENEDORES</div>
+        <h2 class="slide-title">Mapa Completo de Interacción y Protocolos</h2>
+        <p class="slide-subtitle">
+          El mismo grafo planar sin cruces integrado en vivo en la pestaña exclusiva de Administrador (<code>#/system</code>) de la aplicación.
+        </p>
+
+        <div class="arch-svg-wrap">
+          <svg class="arch-svg" viewBox="0 0 1260 440">
+            <!-- Row backgrounds -->
+            <rect x="15" y="12" width="1230" height="112" rx="8" fill="rgba(59,130,246,0.04)" stroke="rgba(59,130,246,0.22)" stroke-dasharray="4 6" />
+            <text x="28" y="30" fill="#60a5fa" font-family="JetBrains Mono" font-size="10" font-weight="600">PLANO 01 · SEGURIDAD (AUTH-DB / AUTH-SERVICE), GATEWAY BFF &amp; CONSOLA REACT</text>
+
+            <rect x="15" y="158" width="1230" height="118" rx="8" fill="rgba(16,185,129,0.04)" stroke="rgba(16,185,129,0.22)" stroke-dasharray="4 6" />
+            <text x="28" y="176" fill="#34d399" font-family="JetBrains Mono" font-size="10" font-weight="600">PLANO 02 · PIPELINE DE VISIÓN ARTIFICIAL (EDGE → RABBITMQ #1 → CV WORKERS x3 → RESULTS-DB → VISUALIZATION)</text>
+
+            <rect x="15" y="308" width="1230" height="118" rx="8" fill="rgba(245,158,11,0.04)" stroke="rgba(245,158,11,0.22)" stroke-dasharray="4 6" />
+            <text x="28" y="326" fill="#fbbf24" font-family="JetBrains Mono" font-size="10" font-weight="600">PLANO 03 · OBJECT STORAGE MINIO (CLAIM CHECK .NPY) &amp; OBSERVABILIDAD (RABBITMQ #2 → MONITORING PIPELINE)</text>
+
+            <!-- Connectors -->
+            <g stroke-width="2" fill="none">
+              <path d="M 1020 76 L 760 76" stroke="#3b82f6" />
+              <path d="M 560 76 L 470 76" stroke="#a855f7" />
+              <path d="M 270 76 L 215 76" stroke="#a855f7" />
+              <path d="M 215 224 L 270 224" stroke="#f59e0b" />
+              <path d="M 470 224 L 560 224" stroke="#10b981" />
+              <path d="M 760 224 L 825 224" stroke="#10b981" />
+              <path d="M 1005 224 L 1050 224" stroke="#3b82f6" />
+              <path d="M 125 256 L 125 344" stroke="#38bdf8" />
+              <path d="M 215 376 L 610 376 L 610 256" stroke="#38bdf8" stroke-dasharray="4 4" />
+              <path d="M 690 256 L 690 344" stroke="#f59e0b" />
+              <path d="M 850 376 L 950 376" stroke="#38bdf8" />
+              <path d="M 1140 192 L 1140 138 L 710 138 L 710 108" stroke="#3b82f6" />
+              <path d="M 670 108 L 670 146 L 785 146 L 785 344" stroke="#f59e0b" />
+            </g>
+
+            <!-- Row 1 Nodes -->
+            <g font-family="JetBrains Mono">
+              <rect x="35" y="44" width="180" height="64" rx="6" fill="#141419" stroke="#a855f7" />
+              <text x="47" y="64" fill="#fafafa" font-size="11" font-weight="700">auth-db (:5433)</text>
+              <text x="47" y="82" fill="#a1a1aa" font-size="9.5">PostgreSQL 16 · users</text>
+              <text x="47" y="98" fill="#c084fc" font-size="9">Sesiones + Roles</text>
+
+              <rect x="270" y="44" width="200" height="64" rx="6" fill="#141419" stroke="#a855f7" />
+              <text x="282" y="64" fill="#fafafa" font-size="11" font-weight="700">auth-service (:8005)</text>
+              <text x="282" y="82" fill="#a1a1aa" font-size="9.5">FastAPI · Token Manager</text>
+              <text x="282" y="98" fill="#c084fc" font-size="9">Login / Logout / Refresh</text>
+
+              <rect x="560" y="44" width="200" height="64" rx="6" fill="#141419" stroke="#3b82f6" />
+              <text x="572" y="64" fill="#fafafa" font-size="11" font-weight="700">api-rest BFF (:8000)</text>
+              <text x="572" y="82" fill="#a1a1aa" font-size="9.5">FastAPI · Gateway + Logs</text>
+              <text x="572" y="98" fill="#60a5fa" font-size="9">Bearer Token + RBAC</text>
+
+              <rect x="1020" y="44" width="210" height="64" rx="6" fill="#141419" stroke="#3b82f6" />
+              <text x="1032" y="64" fill="#fafafa" font-size="11" font-weight="700">frontend SPA (:3000)</text>
+              <text x="1032" y="82" fill="#a1a1aa" font-size="9.5">React 18 · TypeScript · Leaflet</text>
+              <text x="1032" y="98" fill="#60a5fa" font-size="9">Mapa + Inspector + Admin View</text>
+
+              <!-- Row 2 Nodes -->
+              <rect x="35" y="192" width="180" height="64" rx="6" fill="#141419" stroke="#38bdf8" />
+              <text x="47" y="212" fill="#fafafa" font-size="11" font-weight="700">edge-processor (:8001)</text>
+              <text x="47" y="230" fill="#a1a1aa" font-size="9.5">NumPy · Boto3 · Pika</text>
+              <text x="47" y="246" fill="#38bdf8" font-size="9">6 cams · 1 clip/5s · Confirm</text>
+
+              <rect x="270" y="192" width="200" height="64" rx="6" fill="#141419" stroke="#f59e0b" />
+              <text x="282" y="212" fill="#fafafa" font-size="11" font-weight="700">camera-queue (:5672)</text>
+              <text x="282" y="230" fill="#a1a1aa" font-size="9.5">RabbitMQ #1 + DLX</text>
+              <text x="282" y="246" fill="#fbbf24" font-size="9">camera_processing_queue + DLQ</text>
+
+              <rect x="560" y="192" width="200" height="64" rx="6" fill="#141419" stroke="#10b981" />
+              <text x="572" y="212" fill="#fafafa" font-size="11" font-weight="700">cv-module (--scale=3)</text>
+              <text x="572" y="230" fill="#a1a1aa" font-size="9.5">Worker Pool (internal :8002)</text>
+              <text x="572" y="246" fill="#34d399" font-size="9">Detector Mediana + ACK D3</text>
+
+              <rect x="825" y="192" width="180" height="64" rx="6" fill="#141419" stroke="#10b981" />
+              <text x="837" y="212" fill="#fafafa" font-size="11" font-weight="700">results-db (:5434)</text>
+              <text x="837" y="230" fill="#a1a1aa" font-size="9.5">PostgreSQL 16 · results</text>
+              <text x="837" y="246" fill="#34d399" font-size="9">clip_id UNIQUE (Idempotente)</text>
+
+              <rect x="1050" y="192" width="180" height="64" rx="6" fill="#141419" stroke="#3b82f6" />
+              <text x="1062" y="212" fill="#fafafa" font-size="11" font-weight="700">visualization (:8003)</text>
+              <text x="1062" y="230" fill="#a1a1aa" font-size="9.5">FastAPI · Agregación SQL</text>
+              <text x="1062" y="246" fill="#60a5fa" font-size="9">AVG 1m + Serie 5m + Sin Datos</text>
+
+              <!-- Row 3 Nodes -->
+              <rect x="35" y="344" width="180" height="64" rx="6" fill="#141419" stroke="#38bdf8" />
+              <text x="47" y="364" fill="#fafafa" font-size="11" font-weight="700">clips-db (:9000)</text>
+              <text x="47" y="382" fill="#a1a1aa" font-size="9.5">MinIO S3 · bucket clips</text>
+              <text x="47" y="398" fill="#38bdf8" font-size="9">cam-N/&lt;clip_id&gt;.npy (~190KB)</text>
+
+              <rect x="650" y="344" width="200" height="64" rx="6" fill="#141419" stroke="#f59e0b" />
+              <text x="662" y="364" fill="#fafafa" font-size="11" font-weight="700">logs-queue (:5673)</text>
+              <text x="662" y="382" fill="#a1a1aa" font-size="9.5">RabbitMQ #2 · logs_queue</text>
+              <text x="662" y="398" fill="#fbbf24" font-size="9">Eventos JSON + trace_id</text>
+
+              <rect x="950" y="344" width="200" height="64" rx="6" fill="#141419" stroke="#38bdf8" />
+              <text x="962" y="364" fill="#fafafa" font-size="11" font-weight="700">monitoring (:8004)</text>
+              <text x="962" y="382" fill="#a1a1aa" font-size="9.5">Observability Service</text>
+              <text x="962" y="398" fill="#38bdf8" font-size="9">Clips/min · Latencia · DLQ</text>
+            </g>
+          </svg>
+        </div>
+      </section>
+
+      <!-- SLIDE 4: BRAG #1 CLAIM CHECK & RABBITMQ -->
+      <section class="slide" data-slide="3">
+        <div class="slide-kicker">03 · ENGINEERING BRAG #1 — MENSAJERÍA &amp; CLAIM CHECK (D1, D2, D6, D7)</div>
+        <h2 class="slide-title">Por qué nuestro Broker soporta 300 Cámaras sin Saturarse</h2>
+        <p class="slide-subtitle">
+          En lugar de empujar tensores binarios pesados por AMQP, implementamos el patrón <strong>Claim Check</strong> combinando MinIO S3 con mensajes ligeros persistentes y Dead-Letter Exchange nativo.
+        </p>
+
+        <div class="grid-2">
+          <div class="card brag-highlight">
+            <span class="card-badge blue">DECISIÓN D1 · PATRÓN CLAIM CHECK</span>
+            <h3>Separación de Payload Pesado vs. Señalización</h3>
+            <ul>
+              <li><strong>Pre-filtrado en el Borde (<code>edge-processor</code>):</strong> Genera clips de frames NumPy, <strong>descarta frames sin cambios</strong> y reduce la resolución antes de subir a MinIO.</li>
+              <li><strong>Almacenamiento S3:</strong> El objeto <code>cam-1/&lt;clip_id&gt;.npy</code> (~190 KB) se guarda en el bucket <code>clips</code> de MinIO.</li>
+              <li><strong>Mensaje AMQP Ultraligero (~300 Bytes):</strong> Por <code>camera_processing_queue</code> viaja únicamente la referencia con <code>delivery_mode=2</code> (persistente en disco) y <code>publisher confirms</code>.</li>
+            </ul>
+            <pre class="code-snippet">{
+  "clip_id": "dafa2e50-4b1a-...",
+  "trace_id": "dafa2e50-4b1a-...",
+  "camera_id": "cam-1",
+  "intersection_id": "int-1",
+  "timestamp": "2026-11-15T14:03:22.123Z",
+  "object_key": "cam-1/dafa2e50-4b1a.npy",
+  "frames": 8,
+  "shape": [120, 160]
+}</pre>
+          </div>
+
+          <div class="card warn-highlight">
+            <span class="card-badge amber">DECISIONES D6/D7/D12 · DEAD-LETTER QUEUE NATIVA</span>
+            <h3>Aislamiento de Fallos sin Bloquear la Cola Principal</h3>
+            <ul>
+              <li><strong>Topología Declarativa (<code>definitions.json</code>):</strong> La cola principal declara un <em>Dead-Letter Exchange</em> nativo (<code>dlx</code> fanout) enlazado a <code>camera_dlq</code> desde el arranque del contenedor.</li>
+              <li><strong>Desvío Atómico (<code>basic_nack(requeue=False)</code>):</strong> Si un clip es inválido o su objeto en MinIO no existe, el worker rechaza el mensaje sin reencolarlo infinitamente.</li>
+              <li><strong>Auditoría Forense:</strong> RabbitMQ adjunta automáticamente la cabecera <code>x-death</code> con la cola de origen, timestamp y motivo exacto del rechazo.</li>
+              <li><strong>Resultado en Demo (<code>demo_dlq.sh</code>):</strong> Un clip corrupto va directo a <code>camera_dlq</code> en milisegundos sin frenar el flujo de las demás cámaras.</li>
+            </ul>
+          </div>
+        </div>
+      </section>
+
+      <!-- SLIDE 5: BRAG #2 ESCALABILIDAD & IDEMPOTENCIA -->
+      <section class="slide" data-slide="4">
+        <div class="slide-kicker">04 · ENGINEERING BRAG #2 — ESCALABILIDAD, TOLERANCIA A FALLOS E IDEMPOTENCIA</div>
+        <h2 class="slide-title">Cero Pérdida de Clips y Cero Filas Duplicadas</h2>
+        <p class="slide-subtitle">
+          Combinamos entrega <em>at-least-once</em> en RabbitMQ con escrituras idempotentes en PostgreSQL para lograr consistencia efectiva aún matando contenedores en pleno procesamiento.
+        </p>
+
+        <div class="grid-3">
+          <div class="card fluid-highlight">
+            <span class="card-badge green">D5 · ESCALADO HORIZONTAL</span>
+            <h3>Workers Stateless (<code>--scale</code>)</h3>
+            <ul>
+              <li><code>cv-module</code> no fija <code>container_name</code> ni publica puerto en el host para permitir N réplicas con un solo comando:</li>
+              <li><code>docker compose up -d --scale cv-module=3</code></li>
+              <li><strong>Prefetch = 1 (Fair Dispatch):</strong> Cada réplica toma 1 mensaje a la vez; RabbitMQ reparte la carga equitativamente (medido: <strong>173 / 170 / 170</strong> clips por worker).</li>
+            </ul>
+          </div>
+
+          <div class="card brag-highlight">
+            <span class="card-badge blue">D3 · TOLERANCIA A CAÍDAS</span>
+            <h3>ACK Manual Post-Commit</h3>
+            <ul>
+              <li>El worker descarga el <code>.npy</code>, calcula la <strong>mediana</strong> de vehículos visibles y ejecuta el <code>INSERT</code> en PostgreSQL.</li>
+              <li><strong>Recién después del <code>COMMIT</code></strong> envía el <code>basic_ack</code> a RabbitMQ.</li>
+              <li>Si un worker muere a mitad de un clip (<code>docker kill</code>), RabbitMQ detecta la caída del canal y reentrega el mensaje a otra réplica con <code>redelivered: true</code>.</li>
+            </ul>
+          </div>
+
+          <div class="card warn-highlight">
+            <span class="card-badge purple">D12 · IDEMPOTENCIA EN BD</span>
+            <h3>Deduplicación por <code>clip_id</code></h3>
+            <ul>
+              <li>¿Qué pasa si el worker inserta en la BD pero cae justo antes de enviar el <code>ACK</code>? Otro worker reprocesará el mismo clip.</li>
+              <li>La tabla <code>results</code> define <code>clip_id UUID NOT NULL UNIQUE</code> y el worker inserta con:</li>
+              <li><code>ON CONFLICT (clip_id) DO NOTHING</code></li>
+              <li><strong>Resultado:</strong> 3 entregas del mismo mensaje producen <strong>exactamente 1 fila</strong> en <code>results-db</code>.</li>
+            </ul>
+          </div>
+        </div>
+      </section>
+
+      <!-- SLIDE 6: BRAG #3 BFF, AUTH & ANALÍTICA SQL -->
+      <section class="slide" data-slide="5">
+        <div class="slide-kicker">05 · ENGINEERING BRAG #3 — GATEWAY BFF, SEGURIDAD &amp; CONSULTAS SQL (A1–A5)</div>
+        <h2 class="slide-title">Seguridad por Sesión y Semántica Vial Precisa</h2>
+        <p class="slide-subtitle">
+          El BFF centraliza autenticación y autorización por rol, mientras <code>visualization-backend</code> transforma las lecturas crudas de los workers en indicadores viales confiables.
+        </p>
+
+        <div class="grid-2">
+          <div class="card brag-highlight">
+            <span class="card-badge purple">A2 / A3 / F1 · SEGURIDAD &amp; SESIONES REALES</span>
+            <h3>Autenticación Estricta y RBAC</h3>
+            <ul>
+              <li><strong>Validación contra <code>auth-db</code>:</strong> <code>POST /login</code> verifica credenciales en PostgreSQL, registra un <code>session_id</code> único con expiración y devuelve el token al frontend.</li>
+              <li><strong>Propagación Real de Errores HTTP:</strong> Si las credenciales son inválidas, el frontend recibe y muestra el <code>HTTP 401</code> real del backend.</li>
+              <li><strong>Revocación en <code>POST /logout</code>:</strong> Al cerrar sesión, la SPA invalida inmediatamente el token en <code>auth-db</code>.</li>
+              <li><strong>Protección de Rutas Admin:</strong> Endpoints como <code>GET /api/system/health</code> y la vista <code>#/system</code> exigen rol <code>Administrador</code>.</li>
+            </ul>
+          </div>
+
+          <div class="card fluid-highlight">
+            <span class="card-badge green">A4 &amp; SECCIÓN 4 · CONSULTAS VERIFICADAS EN RESULTS-DB</span>
+            <h3>Densidad Vehicular &amp; Regla <code>"Sin Datos" ≠ "Fluido"</code></h3>
+            <ul>
+              <li><strong>Densidad por Clip:</strong> <code>vehicle_count</code> representa los <strong>vehículos visibles simultáneamente</strong> (mediana de frames del clip), no un caudal horario.</li>
+              <li><strong>Estado Actual (Último Minuto):</strong> Promedia los clips de los últimos 60s (<code>WHERE ts &gt; now() - interval '1 minute'</code>) y reporta qué réplica (<code>processed_by</code>) procesó la última lectura.</li>
+              <li><strong>Detección de Caída de Edge (<code>sin_datos</code>):</strong> Si una intersección no recibe clips en el último minuto, no se miente mostrando <code>0 vehículos (Fluido)</code>: se marca explícitamente como <strong><code>SIN DATOS (&gt;1m)</code></strong> conservando la hora exacta de su último dato.</li>
+            </ul>
+          </div>
+        </div>
+      </section>
+
+      <!-- SLIDE 7: BRAG #4 FRONTEND OBSIDIAN TELEMETRY -->
+      <section class="slide" data-slide="6">
+        <div class="slide-kicker">06 · ENGINEERING BRAG #4 — CONSOLA REACT "OBSIDIAN TELEMETRY" (F1–F4)</div>
+        <h2 class="slide-title">Experiencia Operativa de Nivel Centro de Control</h2>
+        <p class="slide-subtitle">
+          Diseñamos una interfaz técnica de alta precisión con cartografía vectorial en vivo, vista dividida animada, Modo Oscuro/Claro completo y un depurador visual de arquitectura para el Administrador.
+        </p>
+
+        <div class="grid-3">
+          <div class="card brag-highlight">
+            <span class="card-badge blue">MAPA &amp; SPLIT INSPECTOR</span>
+            <h3>Cartografía Vial en Tiempo Real</h3>
+            <ul>
+              <li><strong>Corredores Coloreados:</strong> Segmentos reales de avenidas de Montevideo pintados dinámicamente según congestión (Crítico ≥75, Moderado ≥40, Fluido &lt;40, Gris si <code>sin_datos</code>).</li>
+              <li><strong>Polling en Vivo (5s):</strong> Sincronización automática con <code>GET /api/intersections</code> y serie histórica de <code>results-db</code>.</li>
+              <li><strong>Login Arquitectónico:</strong> Mapa vectorial sin etiquetas de calles con telemetría animada y estado en vivo de los puertos <code>:8000</code> y <code>:8005</code>.</li>
+            </ul>
+          </div>
+
+          <div class="card fluid-highlight">
+            <span class="card-badge green">VISTA ADMIN (#/system)</span>
+            <h3>Diagrama de Despliegue en Vivo</h3>
+            <ul>
+              <li><strong>Topología Planar sin Cruces:</strong> Los 12 contenedores organizados en 3 carriles con arcos ortogonales despejados y resaltado luminoso al seleccionar cualquier nodo.</li>
+              <li><strong>Modo Cámara Lenta (5% · <code>0.05x</code>):</strong> Permite frenar los paquetes en vuelo para leer en vivo qué viaja por cada arco (<code>PUT cam-1.npy</code>, <code>META ~300B</code>, <code>MEDIANA 18 VEH</code>).</li>
+              <li><strong>Health Polling Real:</strong> Consulta <code>GET /api/system/health</code> cada 10s y vuelca el estado real en la terminal de logs.</li>
+            </ul>
+          </div>
+
+          <div class="card warn-highlight">
+            <span class="card-badge amber">MODO CLARO &amp; DEMO UX</span>
+            <h3>Doble Tema &amp; Simulación de Fallos</h3>
+            <ul>
+              <li><strong>Modo Oscuro + Modo Claro:</strong> Selector instantáneo Sol/Luna (<code>data-theme="light"</code>) que adapta mapas, gráficos SVG, tarjetas de cristal y el diagrama de sistema.</li>
+              <li><strong>Simulación de Caída de Workers:</strong> Permite pausar <code>cv-module</code> en vivo para demostrar cómo RabbitMQ retiene los mensajes y el BFF sigue respondiendo desde PostgreSQL.</li>
+            </ul>
+          </div>
+        </div>
+      </section>
+
+      <!-- SLIDE 8: BRAG #5 OBSERVABILIDAD & 12-FACTOR -->
+      <section class="slide" data-slide="7">
+        <div class="slide-kicker">07 · ENGINEERING BRAG #5 — OBSERVABILIDAD DISTRIBUIDA &amp; 12-FACTOR APP</div>
+        <h2 class="slide-title">La Observabilidad Nunca Frena el Camino Crítico</h2>
+        <p class="slide-subtitle">
+          Todos los productores de eventos emiten logs JSON estructurados mediante un hilo dedicado con buffer acotado hacia un broker RabbitMQ independiente (<code>logs-queue:5673</code>).
+        </p>
+
+        <div class="grid-2">
+          <div class="card brag-highlight">
+            <span class="card-badge blue">D15 &amp; A1 · LOGGING ASÍNCRONO NO BLOQUEANTE</span>
+            <h3>Contrato Único JSON + Hilo <code>log-shipper</code></h3>
+            <ul>
+              <li><strong>Desacoplamiento Total:</strong> Ni <code>edge-processor</code>, ni <code>cv-module</code>, ni <code>api-rest</code> publican en RabbitMQ dentro del hilo que atiende un clip o una request HTTP.</li>
+              <li><strong>Resiliencia ante Caída de <code>logs-queue</code>:</strong> Si el broker de logs cae, los eventos se encolan en memoria (<code>deque</code> acotada) y el sistema principal sigue procesando clips y logins sin latencia adicional.</li>
+              <li><strong>Trazabilidad con <code>trace_id</code>:</strong> Cada clip lleva <code>trace_id = clip_id</code> desde que nace en el borde hasta que se persiste en <code>results-db</code>.</li>
+            </ul>
+            <pre class="code-snippet">{
+  "ts": "2026-11-15T14:28:49.401Z",
+  "service": "cv-module",
+  "level": "INFO",
+  "event": "clip_processed",
+  "trace_id": "dafa2e50-...",
+  "duration_ms": 6,
+  "vehicle_count": 12,
+  "camera_id": "cam-6",
+  "intersection_id": "int-3",
+  "processed_by": "d6135affc4af"
+}</pre>
+          </div>
+
+          <div class="card fluid-highlight">
+            <span class="card-badge green">12-FACTOR APP COMPLIANCE</span>
+            <h3>Diseño Nativo para Contenedores</h3>
+            <ul>
+              <li><strong>III. Config en el Entorno:</strong> Puertos, credenciales, <code>CAMERA_RANGE</code>, <code>FRAME_INTERVAL</code>, <code>EDGE_THREADS</code> y <code>PROCESSING_DELAY_MS</code> se inyectan vía variables de entorno sin tocar código.</li>
+              <li><strong>IV. Backing Services como Recursos Adjuntos:</strong> PostgreSQL, RabbitMQ y MinIO son intercambiables por URL/host en <code>config.py</code>.</li>
+              <li><strong>VI &amp; VIII. Procesos Stateless &amp; Concurrencia:</strong> Los workers <code>cv-module</code> no guardan estado entre clips y escalan horizontalmente por procesos.</li>
+              <li><strong>XI. Logs como Event Streams:</strong> Salida estándar JSON + envío asíncrono al pipeline de monitoreo.</li>
+            </ul>
+          </div>
+        </div>
+      </section>
+
+      <!-- SLIDE 9: EVIDENCIAS EMPÍRICAS & DEMOS REPRODUCIBLES -->
+      <section class="slide" data-slide="8">
+        <div class="slide-kicker">08 · EVIDENCIAS EMPÍRICAS &amp; BENCHMARKS (D17)</div>
+        <h2 class="slide-title">5 Pruebas Automatizadas y Reproducibles en Vivo</h2>
+        <p class="slide-subtitle">
+          Cada propiedad de sistemas distribuidos fue verificada empíricamente con scripts automatizados sobre Docker Compose.
+        </p>
+
+        <table class="brag-table">
+          <thead>
+            <tr>
+              <th>Script / Demo</th>
+              <th>Propiedad de SD Demostrada</th>
+              <th>Mecanismo Técnico</th>
+              <th>Resultado Medido en Laboratorio</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>./scripts/demo_escalado.sh</code></td>
+              <td><strong>Escalabilidad Horizontal</strong></td>
+              <td>Paso de 1 a 3 réplicas de <code>cv-module</code> bajo carga con <code>PROCESSING_DELAY_MS</code></td>
+              <td>La cola sube a <strong>169 mensajes</strong> con 1 worker y drena a <strong>0 en ~55 s</strong> con 3 workers (reparto <strong>173 / 170 / 170</strong>).</td>
+            </tr>
+            <tr>
+              <td><code>./scripts/demo_worker_caido.sh</code></td>
+              <td><strong>Tolerancia a Fallos</strong></td>
+              <td><code>docker kill</code> de una réplica mientras procesa un clip antes del ACK</td>
+              <td>Otra réplica recibe el mensaje con <code>redelivered: true</code>; <strong>36 clips publicados = 36 filas</strong> en PostgreSQL (0 pérdidas).</td>
+            </tr>
+            <tr>
+              <td><code>./scripts/demo_idempotencia.sh</code></td>
+              <td><strong>Idempotencia Exacta</strong></td>
+              <td>Publicación repetida (×3) del mismo <code>clip_id</code> en la cola AMQP</td>
+              <td><code>ON CONFLICT (clip_id) DO NOTHING</code> absorbe las 2 copias extra: queda <strong>1 sola fila</strong> en <code>results</code>.</td>
+            </tr>
+            <tr>
+              <td><code>./scripts/demo_dlq.sh</code></td>
+              <td><strong>Aislamiento de Mensajes Venenosos</strong></td>
+              <td>Mensaje que referencia un objeto <code>.npy</code> inexistente en MinIO</td>
+              <td>El worker hace <code>nack(requeue=False)</code>; el mensaje pasa atómicamente a <code>camera_dlq</code> con cabecera <code>x-death</code> sin bloquear la cola.</td>
+            </tr>
+            <tr>
+              <td><code>./scripts/prueba_carga.sh</code></td>
+              <td><strong>Alto Rendimiento (Stress Test)</strong></td>
+              <td>Simulación de <strong>300 cámaras</strong> concurrentes (<code>CAMERA_RANGE=1-300</code>)</td>
+              <td>Sostiene <strong>60 clips/segundo</strong> (~3 600 clips/min) con 1 solo worker sin acumulación en RabbitMQ.</td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
+
+      <!-- SLIDE 10: TRANSPARENCIA TÉCNICA & TRABAJO FUTURO -->
+      <section class="slide" data-slide="9">
+        <div class="slide-kicker">09 · TRANSPARENCIA DE INGENIERÍA &amp; EVOLUCIÓN FUTURA</div>
+        <h2 class="slide-title">Trade-offs Conscientes y Hoja de Ruta a Producción</h2>
+        <p class="slide-subtitle">
+          Cada simplificación del MVP fue documentada explícitamente junto con el camino técnico exacto para llevarla a escala de ciudad real.
+        </p>
+
+        <div class="grid-2">
+          <div class="card brag-highlight">
+            <span class="card-badge blue">DECISIONES &amp; COSTOS ACEPTADOS EN EL MVP</span>
+            <h3>Honestidad Técnica en la Defensa</h3>
+            <ul>
+              <li><strong>D16 · Detector CV Simulado detrás de Interfaz <code>Detector</code>:</strong> Por indicación docente (foco en Sistemas Distribuidos), el conteo opera sobre frames NumPy con umbralización y componentes conexas. Reemplazarlo por YOLOv8/ONNX solo cambia la implementación detrás de <code>Detector</code>.</li>
+              <li><strong>D10 · Reparto Estático por Zonas en el Edge:</strong> Si cae una instancia de <code>edge-processor</code>, su zona deja de emitir clips y el dashboard la marca automáticamente como <strong><code>SIN DATOS (&gt;1m)</code></strong>.</li>
+              <li><strong>D12 · Desvío Directo a DLQ sin Backoff:</strong> Prioriza no bloquear jamás la cola principal; los mensajes en <code>camera_dlq</code> se inspeccionan y reprocesan de forma controlada.</li>
+            </ul>
+          </div>
+
+          <div class="card fluid-highlight">
+            <span class="card-badge green">ROADMAP A PRODUCCIÓN (TRABAJO FUTURO)</span>
+            <h3>Próximos Pasos de Arquitectura</h3>
+            <ul>
+              <li><strong>Store-and-Forward Local en el Edge (D14):</strong> Buffer en disco local en cada nodo de captura para tolerar caídas de RabbitMQ o MinIO mayores a 15 segundos sin perder clips.</li>
+              <li><strong>Política de Retención Lifecycle en MinIO:</strong> Expiración automática (<code>mc ilm</code>) tras N horas para acotar el crecimiento (~0,6 GB/min bajo estrés de 300 cámaras).</li>
+              <li><strong>Cluster RabbitMQ Quorum Queues + Reasignación de Cámaras:</strong> Alta disponibilidad del broker y failover dinámico entre instancias de edge.</li>
+              <li><strong>Exportación a Prometheus, Grafana &amp; Jaeger:</strong> Aprovechar el <code>trace_id = clip_id</code> ya presente en todos los eventos de <code>logs_queue</code> para visualización de trazas distribuidas.</li>
+            </ul>
+          </div>
+        </div>
+      </section>
+
+    </main>
+
+    <!-- Bottom Footer -->
+    <footer class="deck-footer">
+      <div>Atajos: <code>←</code> <code>→</code> o <code>Espacio</code> para navegar · <code>T</code> cambiar tema Claro/Oscuro · <code>F</code> pantalla completa</div>
+      <div class="progress-dots" id="progress-dots"></div>
+      <div>SGTU Montevideo · Defensa 2026</div>
+    </footer>
+  </div>
+
+  <script>
+    (function () {
+      const slides = Array.from(document.querySelectorAll('.slide'));
+      const counter = document.getElementById('slide-counter');
+      const dotsContainer = document.getElementById('progress-dots');
+      const prevBtn = document.getElementById('btn-prev');
+      const nextBtn = document.getElementById('btn-next');
+      const themeBtn = document.getElementById('btn-theme');
+      let current = 0;
+
+      slides.forEach((_, idx) => {
+        const dot = document.createElement('button');
+        dot.className = 'dot-btn' + (idx === 0 ? ' active' : '');
+        dot.title = 'Ir a diapositiva ' + (idx + 1);
+        dot.addEventListener('click', () => goTo(idx));
+        dotsContainer.appendChild(dot);
+      });
+
+      const dots = Array.from(dotsContainer.querySelectorAll('.dot-btn'));
+
+      function goTo(index) {
+        current = (index + slides.length) % slides.length;
+        slides.forEach((s, i) => s.classList.toggle('active', i === current));
+        dots.forEach((d, i) => d.classList.toggle('active', i === current));
+        counter.textContent = String(current + 1).padStart(2, '0') + ' / ' + String(slides.length).padStart(2, '0');
+      }
+
+      function toggleTheme() {
+        const html = document.documentElement;
+        const next = html.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
+        html.setAttribute('data-theme', next);
+      }
+
+      prevBtn.addEventListener('click', () => goTo(current - 1));
+      nextBtn.addEventListener('click', () => goTo(current + 1));
+      themeBtn.addEventListener('click', toggleTheme);
+
+      window.addEventListener('keydown', (e) => {
+        if (e.key === 'ArrowRight' || e.key === ' ' || e.key === 'PageDown') {
+          e.preventDefault();
+          goTo(current + 1);
+        } else if (e.key === 'ArrowLeft' || e.key === 'PageUp') {
+          e.preventDefault();
+          goTo(current - 1);
+        } else if (e.key === 't' || e.key === 'T') {
+          toggleTheme();
+        } else if (e.key === 'f' || e.key === 'F') {
+          if (!document.fullscreenElement) {
+            document.documentElement.requestFullscreen().catch(() => {});
+          } else {
+            document.exitFullscreen().catch(() => {});
+          }
+        }
+      });
+    })();
+  </script>
+</body>
+</html>
